@@ -402,7 +402,7 @@ export function CharacterEditor() {
               <AdvancedTab formData={formData} updateField={updateField} updateExtension={updateExtension} />
             )}
             {activeTab === "sprites" && characterId && <SpritesTab characterId={characterId} />}
-            {activeTab === "colors" && <ColorsTab formData={formData} updateExtension={updateExtension} />}
+            {activeTab === "colors" && <ColorsTab formData={formData} updateExtension={updateExtension} avatarUrl={avatarPreview} />}
             {activeTab === "stats" && <StatsTab formData={formData} updateExtension={updateExtension} />}
             {activeTab === "lorebook" && <LorebookTab formData={formData} />}
           </div>
@@ -1259,16 +1259,112 @@ function StatsTab({
 
 // ── Colors Tab ──
 
+function extractColorsFromImage(imgSrc: string): Promise<[string, string, string]> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const size = 64;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas not available"));
+      ctx.drawImage(img, 0, 0, size, size);
+      const { data } = ctx.getImageData(0, 0, size, size);
+
+      // Collect non-transparent, non-near-black/white pixels
+      const pixels: [number, number, number][] = [];
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 128) continue;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        if (lum < 15 || lum > 240) continue;
+        pixels.push([r, g, b]);
+      }
+      if (pixels.length < 3) return reject(new Error("Not enough color data in the avatar"));
+
+      // Simple median-cut quantization to find 3 dominant colors
+      const buckets = medianCut(pixels, 3);
+      const colors = buckets.map((bucket) => {
+        const avg = bucket.reduce(
+          (acc, p) => [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]],
+          [0, 0, 0] as [number, number, number],
+        );
+        return [
+          Math.round(avg[0] / bucket.length),
+          Math.round(avg[1] / bucket.length),
+          Math.round(avg[2] / bucket.length),
+        ] as [number, number, number];
+      });
+
+      // Sort by saturation desc — most vibrant first
+      const sat = ([r, g, b]: [number, number, number]) => {
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        return max === 0 ? 0 : (max - min) / max;
+      };
+      colors.sort((a, b) => sat(b) - sat(a));
+
+      const hex = ([r, g, b]: [number, number, number]) =>
+        `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+
+      const nameColor = hex(colors[0]);
+      const dialogueColor = hex(colors[1] ?? colors[0]);
+      const boxRgb = colors[2] ?? colors[1] ?? colors[0];
+      const boxColor = `rgba(${boxRgb[0]}, ${boxRgb[1]}, ${boxRgb[2]}, 0.25)`;
+
+      resolve([nameColor, dialogueColor, boxColor]);
+    };
+    img.onerror = () => reject(new Error("Failed to load avatar image"));
+    img.src = imgSrc;
+  });
+}
+
+function medianCut(pixels: [number, number, number][], depth: number): [number, number, number][][] {
+  if (depth <= 1 || pixels.length < 2) return [pixels];
+  // Find channel with widest range
+  let maxRange = 0, splitCh = 0;
+  for (let ch = 0; ch < 3; ch++) {
+    const vals = pixels.map((p) => p[ch]);
+    const range = Math.max(...vals) - Math.min(...vals);
+    if (range > maxRange) { maxRange = range; splitCh = ch; }
+  }
+  pixels.sort((a, b) => a[splitCh] - b[splitCh]);
+  const mid = Math.floor(pixels.length / 2);
+  return [
+    ...medianCut(pixels.slice(0, mid), depth - 1),
+    ...medianCut(pixels.slice(mid), depth - 1),
+  ];
+}
+
 function ColorsTab({
   formData,
   updateExtension,
+  avatarUrl,
 }: {
   formData: CharacterData;
   updateExtension: (key: string, value: unknown) => void;
+  avatarUrl: string | null;
 }) {
   const nameColor = (formData.extensions.nameColor as string) ?? "";
   const dialogueColor = (formData.extensions.dialogueColor as string) ?? "";
   const boxColor = (formData.extensions.boxColor as string) ?? "";
+  const [extracting, setExtracting] = useState(false);
+
+  const handleExtract = async () => {
+    if (!avatarUrl) return;
+    setExtracting(true);
+    try {
+      const [nc, dc, bc] = await extractColorsFromImage(avatarUrl);
+      updateExtension("nameColor", nc);
+      updateExtension("dialogueColor", dc);
+      updateExtension("boxColor", bc);
+    } catch {
+      // silently ignore — user can just pick colors manually
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1276,6 +1372,22 @@ function ColorsTab({
         title="Character Colors"
         subtitle="Customize how this character appears in chats. Colors are applied to the name, dialogue, and message bubble."
       />
+
+      {/* Extract from avatar button */}
+      <button
+        type="button"
+        disabled={!avatarUrl || extracting}
+        onClick={handleExtract}
+        className={cn(
+          "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium transition-all",
+          avatarUrl
+            ? "bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 active:scale-[0.98]"
+            : "cursor-not-allowed bg-white/5 text-[var(--muted-foreground)]/50",
+        )}
+      >
+        {extracting ? <Loader2 size={14} className="animate-spin" /> : <Palette size={14} />}
+        {extracting ? "Extracting..." : avatarUrl ? "Extract Colors from Avatar" : "Upload an avatar first"}
+      </button>
 
       {/* Preview card */}
       <div className="rounded-xl border border-[var(--border)] bg-black/30 p-4 space-y-3">

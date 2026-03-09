@@ -37,12 +37,7 @@ import { cn } from "../../lib/utils";
 type CharacterRow = { id: string; data: string; avatarPath: string | null; createdAt: string; updatedAt: string };
 type GroupRow = { id: string; name: string; description: string; characterIds: string; avatarPath: string | null };
 
-type SortOption = "name-asc" | "name-desc" | "newest" | "oldest" | "tokens";
-
-/** Rough token estimate: ~4 chars per token */
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
+type SortOption = "name-asc" | "name-desc" | "newest" | "oldest" | "favorites";
 
 export function CharactersPanel() {
   const { data: characters, isLoading } = useCharacters();
@@ -115,8 +110,13 @@ export function CharactersPanel() {
         return list.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
       case "oldest":
         return list.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
-      case "tokens":
-        return list.sort((a, b) => estimateTokens(JSON.stringify(b.parsed)) - estimateTokens(JSON.stringify(a.parsed)));
+      case "favorites":
+        return list.sort((a, b) => {
+          const aFav = a.parsed.extensions?.fav ? 1 : 0;
+          const bFav = b.parsed.extensions?.fav ? 1 : 0;
+          if (bFav !== aFav) return bFav - aFav;
+          return (a.parsed.name ?? "").localeCompare(b.parsed.name ?? "");
+        });
       default:
         return list;
     }
@@ -202,7 +202,7 @@ export function CharactersPanel() {
             <option value="name-desc">Z-A</option>
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
-            <option value="tokens">Tokens</option>
+            <option value="favorites">Favorites</option>
           </select>
           <ArrowUpDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
         </div>

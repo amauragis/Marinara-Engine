@@ -353,14 +353,21 @@ export const ChatMessage = memo(function ChatMessage({
 
   // Apply regex scripts to AI output (assistant/narrator roles)
   const { applyToAIOutput } = useApplyRegex();
-  const displayContent = useMemo(() => {
-    if (isUser || isSystem) return message.content;
-    return applyToAIOutput(message.content);
-  }, [message.content, isUser, isSystem, applyToAIOutput]);
 
   // Resolve character info
   const charInfo = message.characterId && characterMap ? characterMap.get(message.characterId) : null;
-  const displayName = isUser ? (personaInfo?.name ?? "You") : (charInfo?.name ?? message.characterId ?? "Assistant");
+  const userName = personaInfo?.name ?? "You";
+  const charName = charInfo?.name ?? message.characterId ?? "Assistant";
+
+  const displayContent = useMemo(() => {
+    let text = isUser || isSystem ? message.content : applyToAIOutput(message.content);
+    // Resolve common display macros
+    text = text.replaceAll("{{user}}", userName);
+    text = text.replaceAll("{{char}}", charName);
+    return text;
+  }, [message.content, isUser, isSystem, applyToAIOutput, userName, charName]);
+
+  const displayName = isUser ? userName : charName;
   const avatarUrl = isUser ? (personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
 
   // Resolve colors: character colors for assistant, persona colors for user

@@ -29,11 +29,11 @@ const STEPS: TourStep[] = [
   {
     target: null,
     title: "Welcome to Marinara Engine!",
-    body: "Hi! Here's a quick tutorial to show you around. Confident in your skill? Feel free to skip it!",
+    body: "Hi! Here's a quick tutorial to show you around. Confident in your skill? Feel free to skip it!\n\n**Warning:** skipping the tutorial will make me sad. :(",
     sprite: { src: "/sprites/mari/Mari_wave.png" },
   },
   {
-    target: "sidebar",
+    target: "sidebar-toggle",
     title: "Chat Sidebar",
     body: "This is where all your conversations live. Create new chats, search through them, and organize your history. You can have as many chats as you want!",
     side: "right",
@@ -42,7 +42,7 @@ const STEPS: TourStep[] = [
   {
     target: "panel-buttons",
     title: "Tab Buttons",
-    body: "These buttons open panels on the right for Characters, Lorebooks, Presets, Connections, Agents, and Settings. Everything you need is one click away!",
+    body: "These buttons open panels on the right for Characters, Lorebooks, Presets, Connections, Agents, Persona, and Settings. Everything you need is one click away!",
     side: "bottom",
     sprite: { src: "/sprites/mari/Mari_point_up_left.png", flip: true },
   },
@@ -197,7 +197,20 @@ function TourCardContent({
       </div>
 
       {/* Body */}
-      <p className="mb-4 text-xs leading-relaxed text-[var(--muted-foreground)]">{currentStep.body}</p>
+      <p className="mb-4 text-xs leading-relaxed text-[var(--muted-foreground)]">
+        {currentStep.body.split("\n").map((line, i, arr) => (
+          <span key={i}>
+            {line.split(/(\*\*[^*]+\*\*)/).map((part, j) =>
+              part.startsWith("**") && part.endsWith("**") ? (
+                <strong key={j} className="font-semibold text-[var(--foreground)]">{part.slice(2, -2)}</strong>
+              ) : (
+                <span key={j}>{part}</span>
+              ),
+            )}
+            {i < arr.length - 1 && <br />}
+          </span>
+        ))}
+      </p>
 
       {/* Progress dots */}
       <div className="mb-3 flex items-center justify-center gap-1.5">

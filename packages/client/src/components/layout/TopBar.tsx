@@ -33,8 +33,9 @@ export function TopBar() {
       <div className="flex items-center gap-2">
         <button
           onClick={toggleSidebar}
+          data-tour="sidebar-toggle"
           className="rounded-lg p-2 text-[var(--muted-foreground)] transition-all hover:bg-[var(--accent)] hover:text-[var(--y2k-pink)] active:scale-95"
-          title="Toggle sidebar"
+          title="Chats"
         >
           <PanelLeft size={18} />
         </button>
