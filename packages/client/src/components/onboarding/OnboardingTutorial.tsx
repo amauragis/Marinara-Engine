@@ -405,12 +405,6 @@ function OnboardingTutorialInner() {
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[9999]">
-      {/* Dark backdrop with spotlight cutout */}
-      <div
-        className="pointer-events-auto fixed inset-0 bg-black/60 transition-[clip-path] duration-300"
-        style={targetRect ? { clipPath: buildClipPath(targetRect) } : undefined}
-      />
-
       {/* Pulsing highlight ring around the target element */}
       {targetRect && (
         <div
