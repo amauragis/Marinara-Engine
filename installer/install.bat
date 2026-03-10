@@ -31,7 +31,8 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-for /f "tokens=2 delims=v." %%a in ('node -v') do set NODE_MAJOR=%%a
+for /f "tokens=1 delims=." %%a in ('node -v') do set "NODE_RAW=%%a"
+set "NODE_MAJOR=%NODE_RAW:v=%"
 
 if not defined NODE_MAJOR (
     echo.
