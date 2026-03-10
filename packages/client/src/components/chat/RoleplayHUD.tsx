@@ -205,11 +205,12 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
         </>
       )}
       {enabledAgentTypes.has("persona-stats") && (
-        <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} />
+        <PersonaStatsWidget bars={personaStatBars} onUpdate={(bars) => patchField("personaStats", bars)} layout={layout} />
       )}
       {enabledAgentTypes.has("character-tracker") && (
         <CharactersWidget
           characters={presentCharacters}
+          layout={layout}
           onUpdate={(chars) => {
             if (gameState) {
               setGameState({ ...gameState, presentCharacters: chars });
@@ -219,10 +220,10 @@ export function RoleplayHUD({ chatId, characterCount, layout = "top" }: Roleplay
         />
       )}
       {enabledAgentTypes.has("persona-stats") && (
-        <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} />
+        <InventoryWidget items={inventory} onUpdate={(items) => patchPlayerStats("inventory", items)} layout={layout} />
       )}
       {enabledAgentTypes.has("quest") && (
-        <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} />
+        <QuestsWidget quests={activeQuests} onUpdate={(q) => patchPlayerStats("activeQuests", q)} layout={layout} />
       )}
     </div>
   );
@@ -382,55 +383,68 @@ function WidgetPopover({
   open,
   onClose,
   anchorRef,
+  placement = "bottom",
   children,
   className,
 }: {
   open: boolean;
   onClose: () => void;
   anchorRef: React.RefObject<HTMLElement | null>;
+  placement?: "bottom" | "right" | "left";
   children: React.ReactNode;
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
-  // Position the popover below the anchor element
-  useLayoutEffect(() => {
-    if (!open || !anchorRef.current) return;
+  const computePosition = useCallback(() => {
+    if (!anchorRef.current) return null;
     const rect = anchorRef.current.getBoundingClientRect();
-    // Place below the anchor, left-aligned
-    let left = rect.left;
-    const top = rect.bottom + 4; // 4px gap
-
-    // Ensure it doesn't overflow the right edge
     const popoverWidth = ref.current?.offsetWidth ?? 288;
-    if (left + popoverWidth > window.innerWidth - 8) {
-      left = Math.max(8, window.innerWidth - popoverWidth - 8);
-    }
+    const popoverHeight = ref.current?.offsetHeight ?? 200;
+    let top: number;
+    let left: number;
 
-    setPos({ top, left });
-  }, [open, anchorRef]);
-
-  // Reposition on scroll/resize
-  useEffect(() => {
-    if (!open || !anchorRef.current) return;
-    const update = () => {
-      const rect = anchorRef.current!.getBoundingClientRect();
-      let left = rect.left;
-      const top = rect.bottom + 4;
-      const popoverWidth = ref.current?.offsetWidth ?? 288;
+    if (placement === "right") {
+      left = rect.right + 4;
+      top = rect.top;
+      if (top + popoverHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - popoverHeight - 8);
+      }
+    } else if (placement === "left") {
+      left = rect.left - popoverWidth - 4;
+      top = rect.top;
+      if (left < 8) left = 8;
+      if (top + popoverHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - popoverHeight - 8);
+      }
+    } else {
+      left = rect.left;
+      top = rect.bottom + 4;
       if (left + popoverWidth > window.innerWidth - 8) {
         left = Math.max(8, window.innerWidth - popoverWidth - 8);
       }
-      setPos({ top, left });
-    };
+    }
+    return { top, left };
+  }, [anchorRef, placement]);
+
+  // Position the popover relative to the anchor element
+  useLayoutEffect(() => {
+    if (!open) return;
+    setPos(computePosition());
+  }, [open, computePosition]);
+
+  // Reposition on scroll/resize
+  useEffect(() => {
+    if (!open) return;
+    const update = () => setPos(computePosition());
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [open, anchorRef]);
+  }, [open, computePosition]);
 
   useEffect(() => {
     if (!open) return;
@@ -528,9 +542,11 @@ function InlineEdit({
 function CharactersWidget({
   characters,
   onUpdate,
+  layout = "top",
 }: {
   characters: PresentCharacter[];
   onUpdate: (chars: PresentCharacter[]) => void;
+  layout?: HudPosition;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -591,7 +607,7 @@ function CharactersWidget({
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-72 max-h-80 overflow-y-auto">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"} className="w-72 max-h-80 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Users size={10} /> Present Characters
@@ -735,7 +751,7 @@ function StatBarEditable({
 
 // ── Persona Stats Widget ─────────────────────
 
-function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdate: (bars: CharacterStat[]) => void }) {
+function PersonaStatsWidget({ bars, onUpdate, layout = "top" }: { bars: CharacterStat[]; onUpdate: (bars: CharacterStat[]) => void; layout?: HudPosition }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -772,7 +788,7 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-60 max-h-80 overflow-y-auto">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"} className="w-60 max-h-80 overflow-y-auto">
         <div className="border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider">Persona Stats</span>
         </div>
@@ -794,7 +810,7 @@ function PersonaStatsWidget({ bars, onUpdate }: { bars: CharacterStat[]; onUpdat
 
 // ── Inventory Widget ─────────────────────────
 
-function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate: (items: InventoryItem[]) => void }) {
+function InventoryWidget({ items, onUpdate, layout = "top" }: { items: InventoryItem[]; onUpdate: (items: InventoryItem[]) => void; layout?: HudPosition }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -831,7 +847,7 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-64 max-h-80 overflow-y-auto">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"} className="w-64 max-h-80 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Package size={10} /> Inventory ({items.length})
@@ -878,7 +894,7 @@ function InventoryWidget({ items, onUpdate }: { items: InventoryItem[]; onUpdate
 
 // ── Quests Widget ────────────────────────────
 
-function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate: (quests: QuestProgress[]) => void }) {
+function QuestsWidget({ quests, onUpdate, layout = "top" }: { quests: QuestProgress[]; onUpdate: (quests: QuestProgress[]) => void; layout?: HudPosition }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -923,7 +939,7 @@ function QuestsWidget({ quests, onUpdate }: { quests: QuestProgress[]; onUpdate:
         </span>
       </button>
 
-      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} className="w-72 max-h-96 overflow-y-auto">
+      <WidgetPopover open={open} onClose={() => setOpen(false)} anchorRef={buttonRef} placement={layout === "left" ? "right" : layout === "right" ? "left" : "bottom"} className="w-72 max-h-96 overflow-y-auto">
         <div className="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
           <span className="text-[10px] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
             <Scroll size={10} /> Quests ({quests.length})
