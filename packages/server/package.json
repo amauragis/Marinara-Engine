@@ -10,10 +10,10 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist *.tsbuildinfo",
     "lint": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:generate": "drizzle-kit generate --config=drizzle.config.cts",
+    "db:push": "drizzle-kit push --config=drizzle.config.cts",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.cts",
+    "db:studio": "drizzle-kit studio --config=drizzle.config.cts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
@@ -39,7 +39,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/pdf-parse": "^1.1.5",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "^0.31.9",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

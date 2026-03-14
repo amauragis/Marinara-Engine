@@ -1,8 +1,6 @@
 import { defineConfig } from "drizzle-kit";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { resolve } from "path";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = process.env.DATA_DIR ?? resolve(__dirname, "data");
 
 export default defineConfig({

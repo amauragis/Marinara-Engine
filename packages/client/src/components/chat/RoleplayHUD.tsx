@@ -720,19 +720,19 @@ function CombinedPlayerWidget({
                         onSave={(v) => updateCharacter(idx, { ...char, thoughts: v || null })}
                       />
                     </div>
-                    {char.stats.length > 0 && (
+                    {char.stats?.length > 0 && (
                       <div className="space-y-1 pt-1 border-t border-white/5">
                         {char.stats.map((stat, si) => (
                           <StatBarEditable
                             key={stat.name}
                             stat={stat}
                             onUpdateValue={(v) => {
-                              const next = [...char.stats];
+                              const next = [...(char.stats ?? [])];
                               next[si] = { ...next[si]!, value: v };
                               updateCharacter(idx, { ...char, stats: next });
                             }}
                             onUpdateMax={(v) => {
-                              const next = [...char.stats];
+                              const next = [...(char.stats ?? [])];
                               next[si] = { ...next[si]!, max: v };
                               updateCharacter(idx, { ...char, stats: next });
                             }}
@@ -1161,19 +1161,19 @@ function CharactersWidget({
                   onSave={(v) => updateCharacter(idx, { ...char, thoughts: v || null })}
                 />
               </div>
-              {char.stats.length > 0 && (
+              {char.stats?.length > 0 && (
                 <div className="space-y-1 pt-1 border-t border-white/5">
                   {char.stats.map((stat, si) => (
                     <StatBarEditable
                       key={stat.name}
                       stat={stat}
                       onUpdateValue={(v) => {
-                        const next = [...char.stats];
+                        const next = [...(char.stats ?? [])];
                         next[si] = { ...next[si]!, value: v };
                         updateCharacter(idx, { ...char, stats: next });
                       }}
                       onUpdateMax={(v) => {
-                        const next = [...char.stats];
+                        const next = [...(char.stats ?? [])];
                         next[si] = { ...next[si]!, max: v };
                         updateCharacter(idx, { ...char, stats: next });
                       }}

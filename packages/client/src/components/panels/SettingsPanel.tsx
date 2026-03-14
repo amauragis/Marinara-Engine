@@ -693,9 +693,11 @@ function ThemesSettings() {
     if (!style) {
       style = document.createElement("style");
       style.id = "marinara-css-editor-preview";
-      document.head.appendChild(style);
     }
     style.textContent = themeCss;
+    // Always (re-)append so it's the last <style> in <head>,
+    // overriding the active-theme injector's saved CSS.
+    document.head.appendChild(style);
     return () => {
       style!.textContent = "";
     };
