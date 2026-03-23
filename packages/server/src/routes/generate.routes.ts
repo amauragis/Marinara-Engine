@@ -744,7 +744,8 @@ export async function generateRoutes(app: FastifyInstance) {
             .replace(/\{\{userName\}\}/g, personaName);
           // For group chats in merged mode, instruct Name: text format.
           // Individual mode generates per-character so no name prefix is needed.
-          const earlyGroupMode = (chatMeta.groupChatMode as string) ?? "merged";
+          const earlyGroupMode =
+            chatMode === "conversation" ? "merged" : ((chatMeta.groupChatMode as string) ?? "merged");
           if (isGroup && earlyGroupMode !== "individual") {
             conversationSystemPrompt += [
               ``,
@@ -1500,7 +1501,8 @@ export async function generateRoutes(app: FastifyInstance) {
 
       // ── Group chat processing ──
       const isGroupChat = characterIds.length > 1;
-      const groupChatMode = (chatMeta.groupChatMode as string) ?? "merged";
+      // Conversation mode always uses merged — individual mode is not supported there
+      const groupChatMode = chatMode === "conversation" ? "merged" : ((chatMeta.groupChatMode as string) ?? "merged");
       // Auto-enable speaker colors for conversation mode groups (system prompt already requests tags)
       const groupSpeakerColors = chatMeta.groupSpeakerColors === true || (chatMode === "conversation" && isGroupChat);
       const groupResponseOrder = (chatMeta.groupResponseOrder as string) ?? "sequential";
@@ -2488,6 +2490,23 @@ export async function generateRoutes(app: FastifyInstance) {
         }
 
         const durationMs = Date.now() - genStartTime;
+
+        // ── Auto-detect <think>/<thinking> tags in model output ──
+        // Some models emit reasoning wrapped in <think>...</think> or <thinking>...</thinking>
+        // even when the provider doesn't natively separate reasoning tokens.
+        // Extract this into `fullThinking` so it displays under the brain icon.
+        const thinkTagRe = /^(\s*)<(think(?:ing)?)>([\s\S]*?)<\/\2>/i;
+        const thinkMatch = fullResponse.match(thinkTagRe);
+        if (thinkMatch) {
+          const extractedThinking = thinkMatch[3]!.trim();
+          if (extractedThinking) {
+            // Append to any provider-native thinking already captured
+            fullThinking = fullThinking ? fullThinking + "\n\n" + extractedThinking : extractedThinking;
+          }
+          // Strip the entire think block from the visible response
+          fullResponse = fullResponse.slice(thinkMatch[0].length).trimStart();
+          reply.raw.write(`data: ${JSON.stringify({ type: "content_replace", data: fullResponse })}\n\n`);
+        }
 
         // Send usage to client for debug display
         if (input.debugMode && (usage || durationMs)) {
