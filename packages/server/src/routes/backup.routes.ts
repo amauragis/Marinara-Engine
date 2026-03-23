@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import type { FastifyInstance } from "fastify";
 import { DATA_DIR } from "../utils/data-dir.js";
-import { join } from "path";
+import { basename, join } from "path";
 import { existsSync, readdirSync, statSync } from "fs";
 import { cp, mkdir, copyFile } from "fs/promises";
 
@@ -12,6 +12,9 @@ const BACKUP_DIRS = ["avatars", "sprites", "backgrounds", "gallery", "fonts", "k
 
 /** The primary database filename. */
 const DB_FILENAME = "marinara-engine.db";
+
+/** Resolve the actual database file path, respecting DATABASE_URL. */
+const DB_PATH = (process.env.DATABASE_URL ?? `file:${join(DATA_DIR, DB_FILENAME)}`).replace(/^file:/, "");
 
 export async function backupRoutes(app: FastifyInstance) {
   // Create a full backup folder
@@ -23,15 +26,15 @@ export async function backupRoutes(app: FastifyInstance) {
 
     await mkdir(backupDir, { recursive: true });
 
-    // 1. Copy the database file
-    const dbSrc = join(DATA_DIR, DB_FILENAME);
-    if (existsSync(dbSrc)) {
-      await copyFile(dbSrc, join(backupDir, DB_FILENAME));
+    // 1. Copy the database file (respects DATABASE_URL)
+    const dbName = basename(DB_PATH);
+    if (existsSync(DB_PATH)) {
+      await copyFile(DB_PATH, join(backupDir, dbName));
       // Also copy WAL/SHM if they exist (for a complete backup)
       for (const ext of ["-wal", "-shm"]) {
-        const walSrc = dbSrc + ext;
+        const walSrc = DB_PATH + ext;
         if (existsSync(walSrc)) {
-          await copyFile(walSrc, join(backupDir, DB_FILENAME + ext));
+          await copyFile(walSrc, join(backupDir, dbName + ext));
         }
       }
     }
