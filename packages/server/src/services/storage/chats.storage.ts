@@ -264,7 +264,8 @@ export function createChatsStorage(db: DB) {
 
       // Backfill: save current message extra onto the currently-active swipe
       // so its thinking/generationInfo isn't lost when we switch away
-      const msg = await this.getMessage(messageId);
+      // (skip when silent — greeting swipes don't need backfill)
+      const msg = silent ? null : await this.getMessage(messageId);
       if (msg) {
         const msgExtra = typeof msg.extra === "string" ? JSON.parse(msg.extra) : (msg.extra ?? {});
         const activeSwipe = existing.find((s: any) => s.index === msg.activeSwipeIndex);

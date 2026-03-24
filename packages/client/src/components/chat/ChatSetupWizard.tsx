@@ -621,7 +621,8 @@ function RoleplaySetupWizard({ chat, onFinish }: ChatSetupWizardProps) {
                         }
                         queryClient.invalidateQueries({ queryKey: chatKeys.messages(chat.id) });
                       }
-                    });
+                    })
+                    .catch(() => {});
                 }
               } catch {
                 /* ignore */
