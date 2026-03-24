@@ -3703,7 +3703,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Call /scene/plan internally to get a comprehensive plan
                 const planRes = await app.inject({
                   method: "POST",
-                  url: "/scene/plan",
+                  url: "/api/scene/plan",
                   payload: {
                     chatId: input.chatId,
                     prompt: scnCmd.scenario,
@@ -3721,7 +3721,7 @@ export async function generateRoutes(app: FastifyInstance) {
                 // Call /scene/create with the full plan
                 const createRes = await app.inject({
                   method: "POST",
-                  url: "/scene/create",
+                  url: "/api/scene/create",
                   payload: {
                     originChatId: input.chatId,
                     initiatorCharId: characterId,
