@@ -364,6 +364,15 @@ async function expandWorldStateAgent(ctx: MarkerContext): Promise<ExpandedMarker
 
   if (!snap) return { content: "" };
 
+  // Only include fields from agents that are currently active.
+  // World-state's own fields (date/time/location/weather/temperature) are always included
+  // since this function is only called when world-state is enabled.
+  const active = new Set(ctx.activeAgentIds);
+  const hasCharTracker = active.size === 0 || active.has("character-tracker");
+  const hasPersonaStats = active.size === 0 || active.has("persona-stats");
+  const hasQuest = active.size === 0 || active.has("quest");
+  const hasCustomTracker = active.size === 0 || active.has("custom-tracker");
+
   const parts: string[] = [];
   if (snap.date) parts.push(`Date: ${snap.date}`);
   if (snap.time) parts.push(`Time: ${snap.time}`);
@@ -371,27 +380,29 @@ async function expandWorldStateAgent(ctx: MarkerContext): Promise<ExpandedMarker
   if (snap.weather) parts.push(`Weather: ${snap.weather}`);
   if (snap.temperature) parts.push(`Temperature: ${snap.temperature}`);
 
-  const presentChars = JSON.parse(snap.presentCharacters);
-  if (Array.isArray(presentChars) && presentChars.length > 0) {
-    const charLines = presentChars.map((c: any) => {
-      if (typeof c === "string") return `- ${c}`;
-      const details: string[] = [];
-      if (c.mood) details.push(`mood: ${c.mood}`);
-      if (c.appearance) details.push(`appearance: ${c.appearance}`);
-      if (c.outfit) details.push(`outfit: ${c.outfit}`);
-      if (c.thoughts) details.push(`thoughts: ${c.thoughts}`);
-      if (Array.isArray(c.stats) && c.stats.length > 0) {
-        const statStr = c.stats.map((s: any) => `${s.name}: ${s.value}${s.max ? `/${s.max}` : ""}`).join(", ");
-        details.push(`stats: ${statStr}`);
-      }
-      const detailStr = details.length > 0 ? ` (${details.join("; ")})` : "";
-      return `- ${c.emoji ?? ""} ${c.name ?? c}${detailStr}`;
-    });
-    parts.push(`Present Characters:\n${charLines.join("\n")}`);
+  if (hasCharTracker) {
+    const presentChars = JSON.parse(snap.presentCharacters);
+    if (Array.isArray(presentChars) && presentChars.length > 0) {
+      const charLines = presentChars.map((c: any) => {
+        if (typeof c === "string") return `- ${c}`;
+        const details: string[] = [];
+        if (c.mood) details.push(`mood: ${c.mood}`);
+        if (c.appearance) details.push(`appearance: ${c.appearance}`);
+        if (c.outfit) details.push(`outfit: ${c.outfit}`);
+        if (c.thoughts) details.push(`thoughts: ${c.thoughts}`);
+        if (Array.isArray(c.stats) && c.stats.length > 0) {
+          const statStr = c.stats.map((s: any) => `${s.name}: ${s.value}${s.max ? `/${s.max}` : ""}`).join(", ");
+          details.push(`stats: ${statStr}`);
+        }
+        const detailStr = details.length > 0 ? ` (${details.join("; ")})` : "";
+        return `- ${c.emoji ?? ""} ${c.name ?? c}${detailStr}`;
+      });
+      parts.push(`Present Characters:\n${charLines.join("\n")}`);
+    }
   }
 
   // Persona stats (needs/condition bars)
-  if (snap.personaStats) {
+  if (hasPersonaStats && snap.personaStats) {
     const psBars = typeof snap.personaStats === "string" ? JSON.parse(snap.personaStats) : snap.personaStats;
     if (Array.isArray(psBars) && psBars.length > 0) {
       const barLines = psBars.map((b: any) => `- ${b.name}: ${b.value}/${b.max}`);
@@ -402,8 +413,8 @@ async function expandWorldStateAgent(ctx: MarkerContext): Promise<ExpandedMarker
   if (snap.playerStats) {
     const stats = typeof snap.playerStats === "string" ? JSON.parse(snap.playerStats) : snap.playerStats;
     const statParts: string[] = [];
-    if (stats.status) statParts.push(`Status: ${stats.status}`);
-    if (Array.isArray(stats.activeQuests) && stats.activeQuests.length > 0) {
+    if (hasPersonaStats && stats.status) statParts.push(`Status: ${stats.status}`);
+    if (hasQuest && Array.isArray(stats.activeQuests) && stats.activeQuests.length > 0) {
       const questLines = stats.activeQuests.map((q: any) => {
         const objectives = Array.isArray(q.objectives)
           ? q.objectives.map((o: any) => `  ${o.completed ? "[x]" : "[ ]"} ${o.text}`).join("\n")
@@ -412,16 +423,20 @@ async function expandWorldStateAgent(ctx: MarkerContext): Promise<ExpandedMarker
       });
       statParts.push(`Active Quests:\n${questLines.join("\n")}`);
     }
-    if (Array.isArray(stats.inventory) && stats.inventory.length > 0) {
+    if (hasPersonaStats && Array.isArray(stats.inventory) && stats.inventory.length > 0) {
       const invLines = stats.inventory.map(
         (item: any) =>
           `- ${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ""}${item.description ? ` — ${item.description}` : ""}`,
       );
       statParts.push(`Inventory:\n${invLines.join("\n")}`);
     }
-    if (Array.isArray(stats.stats) && stats.stats.length > 0) {
+    if (hasPersonaStats && Array.isArray(stats.stats) && stats.stats.length > 0) {
       const statLines = stats.stats.map((s: any) => `- ${s.name}: ${s.value}${s.max ? `/${s.max}` : ""}`);
       statParts.push(`Stats:\n${statLines.join("\n")}`);
+    }
+    if (hasCustomTracker && Array.isArray(stats.customTrackerFields) && stats.customTrackerFields.length > 0) {
+      const customLines = stats.customTrackerFields.map((f: any) => `- ${f.name}: ${f.value}`);
+      statParts.push(`Custom:\n${customLines.join("\n")}`);
     }
     if (statParts.length > 0) parts.push(statParts.join("\n"));
   }
