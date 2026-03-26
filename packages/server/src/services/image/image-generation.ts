@@ -6,6 +6,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { inflateRawSync } from "zlib";
 import { DATA_DIR } from "../../utils/data-dir.js";
 import { newId } from "../../utils/id-generator.js";
 import { inferImageSource } from "@marinara-engine/shared";
@@ -207,21 +208,43 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   }
 
   const url = `${baseUrl.replace(/\/+$/, "")}/ai/generate-image`;
+  const model = request.model || "nai-diffusion-4-5-full";
+  const isV4 = model.includes("nai-diffusion-4");
+
+  const parameters: Record<string, unknown> = {
+    width: request.width ?? 832,
+    height: request.height ?? 1216,
+    n_samples: 1,
+    ucPreset: 0,
+    negative_prompt: request.negativePrompt ?? "",
+    seed: Math.floor(Math.random() * 2 ** 32),
+    scale: 6,
+    steps: 28,
+    sampler: "k_euler_ancestral",
+  };
+
+  if (isV4) {
+    parameters.params_version = 3;
+    parameters.v4_prompt = {
+      caption: { base_caption: request.prompt, char_captions: [] },
+      use_coords: false,
+      use_order: true,
+    };
+    parameters.v4_negative_prompt = {
+      caption: { base_caption: request.negativePrompt ?? "", char_captions: [] },
+      use_coords: false,
+      use_order: true,
+    };
+    parameters.reference_image_multiple = [];
+    parameters.reference_information_extracted_multiple = [];
+    parameters.reference_strength_multiple = [];
+  }
+
   const body: Record<string, unknown> = {
-    input: request.prompt,
-    model: request.model || "nai-diffusion-4-5-full",
+    input: isV4 ? "" : request.prompt,
+    model,
     action: "generate",
-    parameters: {
-      width: request.width ?? 832,
-      height: request.height ?? 1216,
-      n_samples: 1,
-      ucPreset: 0,
-      negative_prompt: request.negativePrompt ?? "",
-      seed: Math.floor(Math.random() * 2 ** 32),
-      cfg_scale: 5,
-      steps: 28,
-      sampler: "k_euler_ancestral",
-    },
+    parameters,
   };
 
   const resp = await fetch(url, {
@@ -242,45 +265,13 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   const arrayBuffer = await resp.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
 
-  // Check if response is a zip (PK signature) — extract the first file
+  // Check if response is a zip (PK signature) — extract using the central directory
   if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
-    // Simple zip extraction: find the first local file header and extract
-    const localHeaderEnd = 30;
-    const fnLen = bytes[26]! | (bytes[27]! << 8);
-    const extraLen = bytes[28]! | (bytes[29]! << 8);
-    const dataStart = localHeaderEnd + fnLen + extraLen;
-    const compressedSize = bytes[18]! | (bytes[19]! << 8) | (bytes[20]! << 16) | (bytes[21]! << 24);
-    const compressionMethod = bytes[8]! | (bytes[9]! << 8);
-
-    if (compressionMethod === 0) {
-      // Stored (no compression)
-      const imageData = bytes.slice(dataStart, dataStart + compressedSize);
-      const base64 = Buffer.from(imageData).toString("base64");
+    const extracted = extractFirstFileFromZip(bytes);
+    if (extracted) {
+      const base64 = Buffer.from(extracted).toString("base64");
       return { base64, mimeType: "image/png", ext: "png" };
     }
-
-    // Compressed — use DecompressionStream (available in Node 18+)
-    const compressedData = bytes.slice(dataStart, dataStart + compressedSize);
-    const ds = new DecompressionStream("deflate-raw");
-    const writer = ds.writable.getWriter();
-    writer.write(compressedData);
-    writer.close();
-    const chunks: Uint8Array[] = [];
-    const reader = ds.readable.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const totalLen = chunks.reduce((s, c) => s + c.length, 0);
-    const decompressed = new Uint8Array(totalLen);
-    let offset = 0;
-    for (const c of chunks) {
-      decompressed.set(c, offset);
-      offset += c.length;
-    }
-    const base64 = Buffer.from(decompressed).toString("base64");
-    return { base64, mimeType: "image/png", ext: "png" };
   }
 
   // Check if it's a PNG directly
@@ -300,6 +291,66 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
   }
 
   throw new Error("Could not parse NovelAI image response");
+}
+
+/**
+ * Extract the first file from a zip archive.
+ * Uses the central directory (at the end of the zip) to get reliable offset/size,
+ * since local file headers may have zeroed-out sizes when a data descriptor is used.
+ */
+function extractFirstFileFromZip(zip: Uint8Array): Uint8Array | null {
+  // Find End of Central Directory record (search backwards for signature 0x06054b50)
+  let eocdOffset = -1;
+  for (let i = zip.length - 22; i >= 0; i--) {
+    if (zip[i] === 0x50 && zip[i + 1] === 0x4b && zip[i + 2] === 0x05 && zip[i + 3] === 0x06) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) return null;
+  if (eocdOffset + 19 >= zip.length) return null;
+
+  // Read first central directory entry offset
+  const cdOffset = zip[eocdOffset + 16]! | (zip[eocdOffset + 17]! << 8) |
+    (zip[eocdOffset + 18]! << 16) | (zip[eocdOffset + 19]! << 24);
+
+  // Parse central directory entry for the first file
+  const cd = cdOffset;
+  if (cd + 45 >= zip.length) return null;
+  if (zip[cd] !== 0x50 || zip[cd + 1] !== 0x4b || zip[cd + 2] !== 0x01 || zip[cd + 3] !== 0x02) return null;
+
+  const method = zip[cd + 10]! | (zip[cd + 11]! << 8);
+  const compSize = zip[cd + 20]! | (zip[cd + 21]! << 8) | (zip[cd + 22]! << 16) | (zip[cd + 23]! << 24);
+  const uncompSize = zip[cd + 24]! | (zip[cd + 25]! << 8) | (zip[cd + 26]! << 16) | (zip[cd + 27]! << 24);
+  const localHeaderOffset = zip[cd + 42]! | (zip[cd + 43]! << 8) | (zip[cd + 44]! << 16) | (zip[cd + 45]! << 24);
+
+  // Skip past local file header to reach data
+  const lh = localHeaderOffset;
+  if (lh + 29 >= zip.length) return null;
+  const lhFnLen = zip[lh + 26]! | (zip[lh + 27]! << 8);
+  const lhExtraLen = zip[lh + 28]! | (zip[lh + 29]! << 8);
+  const dataStart = lh + 30 + lhFnLen + lhExtraLen;
+
+  const dataSize = method === 0 ? uncompSize : compSize;
+  if (dataStart + dataSize > zip.length) return null;
+  if (method === 0) {
+    // Stored (no compression)
+    return zip.slice(dataStart, dataStart + uncompSize);
+  }
+
+  if (method === 8) {
+    // Deflate
+    const compressed = zip.slice(dataStart, dataStart + compSize);
+    try {
+      return inflateRawSync(Buffer.from(compressed));
+    } catch {
+      // Malformed or unsupported deflate data
+      return null;
+    }
+  }
+
+  // Unsupported compression method
+  return null;
 }
 
 /**

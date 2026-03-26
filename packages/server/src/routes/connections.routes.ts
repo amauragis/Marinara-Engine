@@ -54,6 +54,16 @@ export async function connectionsRoutes(app: FastifyInstance) {
       const provider = PROVIDERS[conn.provider as keyof typeof PROVIDERS];
       const baseUrl = conn.baseUrl || provider?.defaultBaseUrl || "";
 
+      
+      
+      if (!baseUrl) {
+        return {
+          success: false,
+          message: "No base URL configured for this provider",
+          latencyMs: 0,
+          modelName: null,
+        };
+      }
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (provider?.usesAuthHeader) {
         headers["Authorization"] = `Bearer ${conn.apiKey}`;
@@ -62,8 +72,14 @@ export async function connectionsRoutes(app: FastifyInstance) {
         headers[provider.apiKeyHeader] = conn.apiKey;
       }
 
-      // image_generation has no standard modelsEndpoint; try /models as a connectivity check
-      let testUrl = `${baseUrl}${provider?.modelsEndpoint || "/models"}`;
+      // image_generation has no standard modelsEndpoint — use provider-specific checks
+      let testUrl: string;
+      if (conn.provider === "image_generation" && baseUrl.toLowerCase().includes("novelai.net")) {
+        // NovelAI: validate the API key via the user subscription endpoint
+        testUrl = "https://api.novelai.net/user/subscription";
+      } else {
+        testUrl = `${baseUrl}${provider?.modelsEndpoint || "/models"}`;
+      }
 
       const res = await fetch(testUrl, { headers });
       const latencyMs = Date.now() - start;
