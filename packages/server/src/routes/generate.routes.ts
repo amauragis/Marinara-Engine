@@ -2481,11 +2481,13 @@ export async function generateRoutes(app: FastifyInstance) {
                     ? `<context>\n${trackerParts.map((p) => "    " + p.replace(/\n/g, "\n    ")).join("\n")}\n</context>`
                     : `# Context\n${trackerParts.join("\n")}`;
 
-              // Insert as system message right after the last user message
-              // (i.e. before Output Format / Directions if present)
+              // Insert as system message right before the last user message.
+              // When strict role formatting merges post-chat sections (like
+              // Output Format) into the last user message, this ensures the
+              // tracker context appears before those instructions.
               const lastUserIdx = findLastIndex(finalMessages, "user");
               if (lastUserIdx >= 0) {
-                finalMessages.splice(lastUserIdx + 1, 0, { role: "system", content: contextBlock });
+                finalMessages.splice(lastUserIdx, 0, { role: "system", content: contextBlock });
               } else {
                 finalMessages.splice(finalMessages.length, 0, { role: "system", content: contextBlock });
               }
