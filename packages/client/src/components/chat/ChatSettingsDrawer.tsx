@@ -63,6 +63,7 @@ import { useAgentConfigs, type AgentConfigRow } from "../../hooks/use-agents";
 import { BUILT_IN_AGENTS, BUILT_IN_TOOLS } from "@marinara-engine/shared";
 import type { Chat, CharacterGroup } from "@marinara-engine/shared";
 import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
+import { useHapticStatus, useHapticConnect, useHapticDisconnect, useHapticStartScan } from "../../hooks/use-haptic";
 import { normalizeSpritePlacements } from "./sprite-placement";
 
 interface ChatSettingsDrawerProps {
@@ -1669,27 +1670,7 @@ export function ChatSettingsDrawer({
                       </div>
                     </button>
                     {metadata.enableHapticFeedback && (
-                      <p className="text-[0.625rem] text-[var(--muted-foreground)] px-1">
-                        <strong>Setup:</strong> Install{" "}
-                        <a
-                          href="https://intiface.com/central/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline text-[var(--primary)]"
-                        >
-                          Intiface Central
-                        </a>
-                        , scan for your toy, start the server. See the{" "}
-                        <a
-                          href="https://docs.intiface.com/docs/intiface-central/quickstart"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="underline text-[var(--primary)]"
-                        >
-                          quickstart guide
-                        </a>
-                        .
-                      </p>
+                      <HapticConnectionPanel />
                     )}
                   </div>
                 )}
@@ -3136,6 +3117,104 @@ function ScheduleEditor({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── Haptic Connection Panel ──
+function HapticConnectionPanel() {
+  const { data: status, isLoading } = useHapticStatus();
+  const connect = useHapticConnect();
+  const disconnect = useHapticDisconnect();
+  const startScan = useHapticStartScan();
+
+  // Auto-connect on mount if not connected
+  useEffect(() => {
+    if (!isLoading && status && !status.connected && !connect.isPending) {
+      connect.mutate(undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg bg-[var(--secondary)] px-3 py-2 text-[0.625rem] text-[var(--muted-foreground)]">
+        Checking Intiface Central...
+      </div>
+    );
+  }
+
+  const connected = status?.connected ?? false;
+  const devices = status?.devices ?? [];
+  const scanning = status?.scanning ?? false;
+
+  return (
+    <div className="space-y-1.5 px-1">
+      {/* Connection status */}
+      <div className="flex items-center justify-between rounded-lg bg-[var(--secondary)] px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <div className={cn("h-1.5 w-1.5 rounded-full", connected ? "bg-green-400" : "bg-red-400")} />
+          <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+            {connect.isPending ? "Connecting..." : connected ? "Connected to Intiface Central" : "Not connected"}
+          </span>
+        </div>
+        <button
+          onClick={() => {
+            if (connected) {
+              disconnect.mutate();
+            } else {
+              connect.mutate(undefined);
+            }
+          }}
+          disabled={connect.isPending || disconnect.isPending}
+          className="text-[0.625rem] font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
+        >
+          {connected ? "Disconnect" : "Connect"}
+        </button>
+      </div>
+
+      {/* Error message */}
+      {connect.isError && !connected && (
+        <p className="text-[0.625rem] text-red-400 px-1">
+          Could not connect — make sure{" "}
+          <a
+            href="https://intiface.com/central/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            Intiface Central
+          </a>{" "}
+          is running and the server is started.
+        </p>
+      )}
+
+      {/* Devices */}
+      {connected && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[0.625rem] text-[var(--muted-foreground)]">
+              {devices.length === 0 ? "No devices found" : `${devices.length} device${devices.length !== 1 ? "s" : ""}`}
+            </span>
+            <button
+              onClick={() => startScan.mutate()}
+              disabled={scanning || startScan.isPending}
+              className="text-[0.625rem] font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
+            >
+              {scanning ? "Scanning..." : "Scan for devices"}
+            </button>
+          </div>
+          {devices.map((d) => (
+            <div key={d.index} className="flex items-center gap-1.5 rounded-md bg-[var(--accent)]/50 px-2.5 py-1.5">
+              <Vibrate size="0.625rem" className="text-[var(--primary)]" />
+              <span className="text-[0.625rem] font-medium">{d.name}</span>
+              <span className="text-[0.5rem] text-[var(--muted-foreground)]">
+                {d.capabilities.join(", ")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

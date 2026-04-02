@@ -1187,6 +1187,14 @@ export async function generateRoutes(app: FastifyInstance) {
           const hapticEnabled = chatMeta.enableHapticFeedback === true;
           if (hapticEnabled) {
             const { hapticService } = await import("../services/haptic/buttplug-service.js");
+            // Auto-connect to Intiface Central if not already connected
+            if (!hapticService.connected) {
+              try {
+                await hapticService.connect();
+              } catch {
+                console.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
+              }
+            }
             if (hapticService.connected && hapticService.devices.length > 0) {
               const hapticNum =
                 1 +
@@ -2271,6 +2279,14 @@ export async function generateRoutes(app: FastifyInstance) {
       if (resolvedAgents.some((a) => a.type === "haptic")) {
         try {
           const { hapticService } = await import("../services/haptic/buttplug-service.js");
+          // Auto-connect to Intiface Central if not already connected
+          if (!hapticService.connected) {
+            try {
+              await hapticService.connect();
+            } catch {
+              console.warn("[haptic] Auto-connect to Intiface Central failed — is the server running?");
+            }
+          }
           if (hapticService.connected && hapticService.devices.length > 0) {
             agentContext.memory._connectedDevices = hapticService.devices.map((d) => ({
               name: d.name,
