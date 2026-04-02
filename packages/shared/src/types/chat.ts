@@ -14,6 +14,17 @@ export type GroupResponseOrder = "sequential" | "smart" | "manual";
 /** Role of a message in the conversation. */
 export type MessageRole = "user" | "assistant" | "system" | "narrator";
 
+/** Which side sprite sidebars / default sprite layouts prefer. */
+export type SpriteSide = "left" | "right";
+
+/** A saved on-screen sprite anchor position within the chat area. */
+export interface SpritePlacement {
+  /** Horizontal anchor percentage within the chat stage. */
+  x: number;
+  /** Vertical anchor percentage within the chat stage. */
+  y: number;
+}
+
 /** A single chat conversation. */
 export interface Chat {
   id: string;
@@ -70,6 +81,12 @@ export interface ChatMetadata {
   groupSpeakerColors?: boolean;
   /** Group individual mode response order: "sequential" or "smart" (agent-decided) */
   groupResponseOrder?: GroupResponseOrder;
+  /** Characters with visible roleplay sprites enabled for this chat. */
+  spriteCharacterIds?: string[];
+  /** Preferred sidebar / default layout side for chat sprites. */
+  spritePosition?: SpriteSide;
+  /** Saved freeform positions for enabled roleplay sprites. */
+  spritePlacements?: Record<string, SpritePlacement>;
   /** When true, a shared group scenario replaces individual character card scenarios */
   groupScenarioOverride?: boolean;
   /** The shared scenario text used when groupScenarioOverride is enabled */

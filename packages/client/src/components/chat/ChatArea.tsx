@@ -51,6 +51,7 @@ import {
   Loader2,
   ScrollText,
   FlipHorizontal2,
+  Move,
   HelpCircle,
   MoreHorizontal,
   Globe,
@@ -59,7 +60,7 @@ import {
   Trash2,
   PenLine,
 } from "lucide-react";
-import type { Message } from "@marinara-engine/shared";
+import type { Message, SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useUIStore } from "../../stores/ui.store";
 import { useAgentStore } from "../../stores/agent.store";
 import { cn } from "../../lib/utils";
@@ -74,6 +75,7 @@ import { useActiveLorebookEntries } from "../../hooks/use-lorebooks";
 import { APP_VERSION } from "@marinara-engine/shared";
 import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 import { useTranslationStore } from "../../hooks/use-translate";
+import { mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
 
 /** Map characterId → { name, avatarUrl, colors, avatarCrop } */
 export type CharacterMap = Map<
@@ -244,6 +246,7 @@ export function ChatArea() {
   const [filesOpen, setFilesOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [spriteArrangeMode, setSpriteArrangeMode] = useState(false);
 
   // Delete dialog & multi-select state
   const [deleteDialogMessageId, setDeleteDialogMessageId] = useState<string | null>(null);
@@ -387,8 +390,10 @@ export function ChatArea() {
     const raw = (chat as unknown as { metadata?: string | Record<string, unknown> }).metadata;
     return typeof raw === "string" ? JSON.parse(raw) : (raw ?? {});
   }, [chat]);
-  const spriteCharacterIds: string[] = chatMeta.spriteCharacterIds ?? [];
-  const spritePosition: "left" | "right" = chatMeta.spritePosition ?? "left";
+  const spriteCharacterIds: string[] = Array.isArray(chatMeta.spriteCharacterIds) ? chatMeta.spriteCharacterIds : [];
+  const spritePosition: SpriteSide = chatMeta.spritePosition === "right" ? "right" : "left";
+  const spritePlacements = useMemo(() => normalizeSpritePlacements(chatMeta.spritePlacements), [chatMeta.spritePlacements]);
+  const hasCustomSpritePlacements = Object.keys(spritePlacements).length > 0;
   // Prefer per-swipe expressions from the last assistant message's extra (survives swipe switching),
   // falling back to chat-level metadata for backward compatibility.
   const spriteExpressions: Record<string, string> = useMemo(() => {
@@ -471,16 +476,27 @@ export function ChatArea() {
   }, []);
 
   const expressionSaveTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  const spritePlacementSaveTimer = useRef<ReturnType<typeof setTimeout>>(null);
   const pendingExpressions = useRef<Record<string, string>>(spriteExpressions);
+  const pendingSpritePlacements = useRef<Record<string, SpritePlacement>>(spritePlacements);
 
   useEffect(() => {
     pendingExpressions.current = spriteExpressions;
   }, [spriteExpressions]);
 
+  useEffect(() => {
+    pendingSpritePlacements.current = spritePlacements;
+  }, [spritePlacements]);
+
+  useEffect(() => {
+    setSpriteArrangeMode(false);
+  }, [chat?.id]);
+
   // Clean up expression save timer on unmount
   useEffect(() => {
     return () => {
       if (expressionSaveTimer.current) clearTimeout(expressionSaveTimer.current);
+      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
     };
   }, []);
 
@@ -510,11 +526,43 @@ export function ChatArea() {
     [chat?.id, updateMeta, messages, updateMessageExtra],
   );
 
-  const handleToggleSpritePosition = useCallback(() => {
+  const handleSpritePlacementChange = useCallback(
+    (characterId: string, placement: SpritePlacement) => {
+      if (!chat?.id) return;
+      pendingSpritePlacements.current = { ...pendingSpritePlacements.current, [characterId]: placement };
+      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
+      spritePlacementSaveTimer.current = setTimeout(() => {
+        updateMeta.mutate({ id: chat.id, spritePlacements: pendingSpritePlacements.current });
+      }, 250);
+    },
+    [chat?.id, updateMeta],
+  );
+
+  const handleResetSpritePlacements = useCallback(() => {
     if (!chat?.id) return;
-    const newSide = spritePosition === "left" ? "right" : "left";
-    updateMeta.mutate({ id: chat.id, spritePosition: newSide });
-  }, [chat?.id, spritePosition, updateMeta]);
+    pendingSpritePlacements.current = {};
+    if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
+    updateMeta.mutate({ id: chat.id, spritePlacements: {} });
+  }, [chat?.id, updateMeta]);
+
+  const handleSetSpritePosition = useCallback(
+    (nextSide: SpriteSide) => {
+      if (!chat?.id || nextSide === spritePosition) return;
+      const nextPlacements = hasCustomSpritePlacements ? mirrorSpritePlacements(spritePlacements) : spritePlacements;
+      pendingSpritePlacements.current = nextPlacements;
+      if (spritePlacementSaveTimer.current) clearTimeout(spritePlacementSaveTimer.current);
+      updateMeta.mutate({
+        id: chat.id,
+        spritePosition: nextSide,
+        spritePlacements: nextPlacements,
+      });
+    },
+    [chat?.id, hasCustomSpritePlacements, spritePlacements, spritePosition, updateMeta],
+  );
+
+  const handleToggleSpritePosition = useCallback(() => {
+    handleSetSpritePosition(spritePosition === "left" ? "right" : "left");
+  }, [handleSetSpritePosition, spritePosition]);
 
   // Set of enabled agent type IDs (respects both global enableAgents toggle and per-chat agent list)
   const enabledAgentTypes = useMemo(() => {
@@ -1003,7 +1051,17 @@ export function ChatArea() {
           />
 
           {/* Drawers */}
-          {chat && <ChatSettingsDrawer chat={chat} open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+          {chat && (
+            <ChatSettingsDrawer
+              chat={chat}
+              open={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              spriteArrangeMode={spriteArrangeMode}
+              onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
+              onResetSpritePlacements={handleResetSpritePlacements}
+              onSpriteSideChange={handleSetSpritePosition}
+            />
+          )}
           {chat && <ChatFilesDrawer chat={chat} open={filesOpen} onClose={() => setFilesOpen(false)} />}
           {chat && <ChatGalleryDrawer chat={chat} open={galleryOpen} onClose={() => setGalleryOpen(false)} />}
           {chat && wizardOpen && (
@@ -1106,13 +1164,16 @@ export function ChatArea() {
         <div className="absolute inset-0 rpg-overlay" />
         <div className="absolute inset-0 rpg-vignette pointer-events-none" />
         {weatherEffects && <WeatherEffectsConnected />}
-        {expressionAgentEnabled && (
+        {expressionAgentEnabled && spriteCharacterIds.length > 0 && (
           <SpriteOverlay
-            characterIds={chatCharIds}
+            characterIds={spriteCharacterIds}
             messages={msgPayload}
             side={spritePosition}
             spriteExpressions={spriteExpressions}
+            spritePlacements={spritePlacements}
+            editing={spriteArrangeMode}
             onExpressionChange={handleExpressionChange}
+            onPlacementChange={handleSpritePlacementChange}
           />
         )}
 
@@ -1150,10 +1211,21 @@ export function ChatArea() {
                       title="Manage Chat Files"
                       onClick={() => setFilesOpen(true)}
                     />
-                    {expressionAgentEnabled && chatCharIds.length > 0 && (
+                    {expressionAgentEnabled && spriteCharacterIds.length > 0 && (
+                      <RpToolbarButton
+                        icon={<Move size="0.875rem" />}
+                        title={spriteArrangeMode ? "Finish arranging sprites" : "Arrange sprites"}
+                        onClick={() => setSpriteArrangeMode((prev) => !prev)}
+                      />
+                    )}
+                    {expressionAgentEnabled && spriteCharacterIds.length > 0 && (
                       <RpToolbarButton
                         icon={<FlipHorizontal2 size="0.875rem" />}
-                        title={`Sprite: ${spritePosition} side`}
+                        title={
+                          hasCustomSpritePlacements
+                            ? `Mirror sprites to the ${spritePosition === "left" ? "right" : "left"}`
+                            : `Sprite default side: ${spritePosition}`
+                        }
                         onClick={handleToggleSpritePosition}
                       />
                     )}
@@ -1208,10 +1280,21 @@ export function ChatArea() {
                         title="Manage Chat Files"
                         onClick={() => setFilesOpen(true)}
                       />
-                      {expressionAgentEnabled && chatCharIds.length > 0 && (
+                      {expressionAgentEnabled && spriteCharacterIds.length > 0 && (
+                        <RpToolbarButton
+                          icon={<Move size="0.875rem" />}
+                          title={spriteArrangeMode ? "Finish arranging sprites" : "Arrange sprites"}
+                          onClick={() => setSpriteArrangeMode((prev) => !prev)}
+                        />
+                      )}
+                      {expressionAgentEnabled && spriteCharacterIds.length > 0 && (
                         <RpToolbarButton
                           icon={<FlipHorizontal2 size="0.875rem" />}
-                          title={`Sprite: ${spritePosition} side`}
+                          title={
+                            hasCustomSpritePlacements
+                              ? `Mirror sprites to the ${spritePosition === "left" ? "right" : "left"}`
+                              : `Sprite default side: ${spritePosition}`
+                          }
                           onClick={handleToggleSpritePosition}
                         />
                       )}
@@ -1437,7 +1520,17 @@ export function ChatArea() {
             </div>
 
             {/* Drawers */}
-            {chat && <ChatSettingsDrawer chat={chat} open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+            {chat && (
+              <ChatSettingsDrawer
+                chat={chat}
+                open={settingsOpen}
+                onClose={() => setSettingsOpen(false)}
+                spriteArrangeMode={spriteArrangeMode}
+                onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
+                onResetSpritePlacements={handleResetSpritePlacements}
+                onSpriteSideChange={handleSetSpritePosition}
+              />
+            )}
             {chat && <ChatFilesDrawer chat={chat} open={filesOpen} onClose={() => setFilesOpen(false)} />}
             {chat && <ChatGalleryDrawer chat={chat} open={galleryOpen} onClose={() => setGalleryOpen(false)} />}
             {chat && wizardOpen && (

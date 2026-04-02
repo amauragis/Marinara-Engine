@@ -60,6 +60,7 @@ There is not a meaningful automated repo test suite yet. Do not present `pnpm te
 ## Pull Request Expectations
 
 - Keep PRs focused. Separate unrelated refactors from user-facing fixes or documentation work.
+- Explain the why clearly in the PR description. Reviewers should understand the user problem, regression, or tradeoff being addressed, not just the implementation summary.
 - Update documentation in the same PR when behavior changes affect installation, updates, release flow, launchers, or platform-specific behavior.
 - Include screenshots or short recordings for UI changes.
 - Call out manual validation clearly, especially for launcher, installer, or Android wrapper changes.

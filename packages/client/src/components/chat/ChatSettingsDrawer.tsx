@@ -63,11 +63,16 @@ import { useAgentConfigs, type AgentConfigRow } from "../../hooks/use-agents";
 import { BUILT_IN_AGENTS, BUILT_IN_TOOLS } from "@marinara-engine/shared";
 import type { Chat, CharacterGroup } from "@marinara-engine/shared";
 import { useCustomTools, type CustomToolRow } from "../../hooks/use-custom-tools";
+import { normalizeSpritePlacements } from "./sprite-placement";
 
 interface ChatSettingsDrawerProps {
   chat: Chat;
   open: boolean;
   onClose: () => void;
+  spriteArrangeMode?: boolean;
+  onToggleSpriteArrange?: () => void;
+  onResetSpritePlacements?: () => void;
+  onSpriteSideChange?: (side: "left" | "right") => void;
 }
 
 // Agents that should not be manually added to roleplay chats
@@ -78,7 +83,15 @@ const HIDDEN_ROLEPLAY_AGENTS = new Set([
   "autonomous-messenger",
 ]);
 
-export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerProps) {
+export function ChatSettingsDrawer({
+  chat,
+  open,
+  onClose,
+  spriteArrangeMode = false,
+  onToggleSpriteArrange,
+  onResetSpritePlacements,
+  onSpriteSideChange,
+}: ChatSettingsDrawerProps) {
   const qc = useQueryClient();
   const updateChat = useUpdateChat();
   const updateMeta = useUpdateChatMetadata();
@@ -111,8 +124,9 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
   const activeLorebookIds: string[] = metadata.activeLorebookIds ?? [];
   const activeAgentIds: string[] = metadata.activeAgentIds ?? [];
   const activeToolIds: string[] = metadata.activeToolIds ?? [];
-  const spriteCharacterIds: string[] = metadata.spriteCharacterIds ?? [];
-  const spritePosition: "left" | "right" = metadata.spritePosition ?? "left";
+  const spriteCharacterIds: string[] = Array.isArray(metadata.spriteCharacterIds) ? metadata.spriteCharacterIds : [];
+  const spritePosition: "left" | "right" = metadata.spritePosition === "right" ? "right" : "left";
+  const hasCustomSpritePlacements = Object.keys(normalizeSpritePlacements(metadata.spritePlacements)).length > 0;
 
   // Build the available agent list: built-in + custom agents from DB
   // In roleplay mode, hide agents that are either automatic or handled internally.
@@ -260,6 +274,26 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
     }
     updateMeta.mutate({ id: chat.id, spriteCharacterIds: current });
   };
+
+  const setSpriteSide = useCallback(
+    (nextSide: "left" | "right") => {
+      if (nextSide === spritePosition) return;
+      if (onSpriteSideChange) {
+        onSpriteSideChange(nextSide);
+        return;
+      }
+      updateMeta.mutate({ id: chat.id, spritePosition: nextSide });
+    },
+    [chat.id, onSpriteSideChange, spritePosition, updateMeta],
+  );
+
+  const resetSpritePlacements = useCallback(() => {
+    if (onResetSpritePlacements) {
+      onResetSpritePlacements();
+      return;
+    }
+    updateMeta.mutate({ id: chat.id, spritePlacements: {} });
+  }, [chat.id, onResetSpritePlacements, updateMeta]);
 
   // ── Character drag-and-drop reordering ──
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -756,35 +790,69 @@ export function ChatSettingsDrawer({ chat, open, onClose }: ChatSettingsDrawerPr
               </div>
             )}
 
-            {/* Sprite position — only show if any sprites enabled */}
+            {/* Sprite layout — only show if any sprites enabled */}
             {spriteCharacterIds.length > 0 && (
-              <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--secondary)] px-3 py-2">
-                <Image size="0.75rem" className="text-[var(--muted-foreground)]" />
-                <span className="flex-1 text-[0.6875rem] text-[var(--muted-foreground)]">Sprite Side</span>
-                <div className="flex rounded-md ring-1 ring-[var(--border)]">
+              <div className="mt-2 rounded-lg bg-[var(--secondary)] px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Image size="0.75rem" className="text-[var(--muted-foreground)]" />
+                  <span className="flex-1 text-[0.6875rem] text-[var(--muted-foreground)]">Sprite Layout</span>
                   <button
-                    onClick={() => updateMeta.mutate({ id: chat.id, spritePosition: "left" })}
+                    onClick={() => onToggleSpriteArrange?.()}
                     className={cn(
-                      "px-2.5 py-1 text-[0.625rem] font-medium transition-colors rounded-l-md",
-                      spritePosition === "left"
+                      "rounded-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors ring-1 ring-[var(--border)]",
+                      spriteArrangeMode
                         ? "bg-[var(--primary)] text-white"
                         : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
                     )}
                   >
-                    Left
+                    {spriteArrangeMode ? "Done" : "Arrange"}
                   </button>
                   <button
-                    onClick={() => updateMeta.mutate({ id: chat.id, spritePosition: "right" })}
+                    onClick={resetSpritePlacements}
+                    disabled={!hasCustomSpritePlacements}
                     className={cn(
-                      "px-2.5 py-1 text-[0.625rem] font-medium transition-colors rounded-r-md",
-                      spritePosition === "right"
-                        ? "bg-[var(--primary)] text-white"
-                        : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      "rounded-md px-2.5 py-1 text-[0.625rem] font-medium transition-colors ring-1 ring-[var(--border)]",
+                      hasCustomSpritePlacements
+                        ? "text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+                        : "cursor-not-allowed opacity-40 text-[var(--muted-foreground)]",
                     )}
                   >
-                    Right
+                    Reset
                   </button>
                 </div>
+
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-[0.625rem] font-medium text-[var(--muted-foreground)]">Default Side</span>
+                  <div className="flex rounded-md ring-1 ring-[var(--border)]">
+                    <button
+                      onClick={() => setSpriteSide("left")}
+                      className={cn(
+                        "px-2.5 py-1 text-[0.625rem] font-medium transition-colors rounded-l-md",
+                        spritePosition === "left"
+                          ? "bg-[var(--primary)] text-white"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      )}
+                    >
+                      Left
+                    </button>
+                    <button
+                      onClick={() => setSpriteSide("right")}
+                      className={cn(
+                        "px-2.5 py-1 text-[0.625rem] font-medium transition-colors rounded-r-md",
+                        spritePosition === "right"
+                          ? "bg-[var(--primary)] text-white"
+                          : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      )}
+                    >
+                      Right
+                    </button>
+                  </div>
+                </div>
+
+                <p className="mt-2 text-[0.5625rem] leading-relaxed text-[var(--muted-foreground)]">
+                  Arrange mode lets you drag sprites anywhere in the chat area. Reset clears saved positions. Changing
+                  the side flips the current layout.
+                </p>
               </div>
             )}
 

@@ -1,25 +1,31 @@
 // ──────────────────────────────────────────────
 // Sprite Overlay — VN-style character sprites in chat
-// Shows character sprites on the left/right of the roleplay view.
-// Expression is determined by the Expression Engine agent result
-// or falls back to keyword-based detection from message text.
+// Supports persisted free placement to avoid group-chat overlap.
 // ──────────────────────────────────────────────
 import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence, type TargetAndTransition } from "framer-motion";
+import type { SpritePlacement, SpriteSide } from "@marinara-engine/shared";
 import { useCharacterSprites, type SpriteInfo } from "../../hooks/use-characters";
 import { useAgentStore } from "../../stores/agent.store";
+import { clampSpritePlacement, getDefaultSpritePlacement, type SpritePlacementMap } from "./sprite-placement";
 
 interface SpriteOverlayProps {
-  /** IDs of characters in this chat */
+  /** IDs of characters with sprites enabled in this chat */
   characterIds: string[];
   /** The last N messages to detect expressions from */
   messages: Array<{ role: string; characterId?: string | null; content: string }>;
-  /** Which side the sprites appear on */
-  side: "left" | "right";
+  /** Which side the sidebar / default sprite layout prefers */
+  side: SpriteSide;
   /** Saved expressions per character (from chat metadata) */
   spriteExpressions?: Record<string, string>;
+  /** Saved freeform placements per character (from chat metadata) */
+  spritePlacements?: SpritePlacementMap;
+  /** Whether the overlay is currently in drag-to-arrange mode */
+  editing?: boolean;
   /** Called when expression changes (to persist it) */
   onExpressionChange?: (characterId: string, expression: string) => void;
+  /** Called when a sprite is moved (to persist it) */
+  onPlacementChange?: (characterId: string, placement: SpritePlacement) => void;
 }
 
 type Transition = "crossfade" | "bounce" | "shake" | "hop" | "none";
@@ -61,8 +67,13 @@ export function SpriteOverlay({
   messages,
   side,
   spriteExpressions,
+  spritePlacements,
+  editing = false,
   onExpressionChange,
+  onPlacementChange,
 }: SpriteOverlayProps) {
+  const stageRef = useRef<HTMLDivElement>(null);
+
   // Subscribe to agent expression results
   const expressionResult = useAgentStore((s) => s.lastResults.get("expression"));
 
@@ -103,17 +114,12 @@ export function SpriteOverlay({
   }, [expressionResult, onExpressionChange]);
 
   // Fallback: keyword-based detection when no agent result.
-  // Saved (agent-determined) expressions take priority — keyword detection
-  // only fills in characters that don't have a saved expression yet.
-  // We never persist keyword-guessed expressions to metadata; only the
-  // agent result path calls onExpressionChange.
   useEffect(() => {
     if (!messages?.length) return;
     if (expressionResult?.success && (expressionResult.data as any)?.expressions?.length) return;
 
     const newStates: Record<string, CharacterExpressionState> = {};
 
-    // 1. Restore saved expressions first (these came from the expression agent)
     for (const id of characterIds) {
       const saved = spriteExpressions?.[id];
       if (saved) {
@@ -121,7 +127,6 @@ export function SpriteOverlay({
       }
     }
 
-    // 2. Keyword-detect only for characters without a saved expression
     const recentAssistant = messages.filter((m) => m.role === "assistant").slice(-5);
     for (const msg of recentAssistant) {
       if (msg.characterId && !newStates[msg.characterId]) {
@@ -130,7 +135,6 @@ export function SpriteOverlay({
       }
     }
 
-    // 3. Fill remaining characters from their last message
     for (const id of characterIds) {
       if (!newStates[id]) {
         const lastMsg = [...messages].reverse().find((m) => m.characterId === id && m.role === "assistant");
@@ -142,21 +146,41 @@ export function SpriteOverlay({
     setStates(newStates);
   }, [messages, characterIds, expressionResult, spriteExpressions]);
 
-  if (characterIds.length === 0) return null;
-
   const visibleChars = characterIds.slice(0, 3);
+  const resolvedPlacements = useMemo(() => {
+    const placements: Record<string, SpritePlacement> = {};
+    for (const [index, charId] of visibleChars.entries()) {
+      placements[charId] = clampSpritePlacement(
+        spritePlacements?.[charId] ?? getDefaultSpritePlacement(index, visibleChars.length, side),
+      );
+    }
+    return placements;
+  }, [side, spritePlacements, visibleChars]);
+
+  if (visibleChars.length === 0) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
-      {visibleChars.map((charId) => (
+    <div ref={stageRef} className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
+      {visibleChars.map((charId, index) => (
         <CharacterSprite
           key={charId}
           characterId={charId}
           expression={states[charId]?.expression ?? "neutral"}
           transition={states[charId]?.transition ?? "crossfade"}
-          side={side}
+          placement={resolvedPlacements[charId]!}
+          spriteCount={visibleChars.length}
+          editing={editing}
+          zIndex={10 + index}
+          stageRef={stageRef}
+          onPlacementChange={onPlacementChange}
         />
       ))}
+
+      {editing && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[30] -translate-x-1/2 rounded-full border border-white/10 bg-black/60 px-3 py-1 text-[0.625rem] font-medium text-white/80 shadow-lg backdrop-blur-md">
+          Drag sprites to reposition them. Changes save automatically.
+        </div>
+      )}
     </div>
   );
 }
@@ -213,16 +237,35 @@ function CharacterSprite({
   characterId,
   expression,
   transition,
-  side,
+  placement,
+  spriteCount,
+  editing,
+  zIndex,
+  stageRef,
+  onPlacementChange,
 }: {
   characterId: string;
   expression: string;
   transition: Transition;
-  side: "left" | "right";
+  placement: SpritePlacement;
+  spriteCount: number;
+  editing: boolean;
+  zIndex: number;
+  stageRef: React.RefObject<HTMLDivElement | null>;
+  onPlacementChange?: (characterId: string, placement: SpritePlacement) => void;
 }) {
   const { data: sprites } = useCharacterSprites(characterId);
   const prevExpressionRef = useRef(expression);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origin: SpritePlacement;
+  } | null>(null);
   const [activeTransition, setActiveTransition] = useState<Transition>(transition);
+  const [currentPlacement, setCurrentPlacement] = useState<SpritePlacement>(() => clampSpritePlacement(placement));
+  const currentPlacementRef = useRef(currentPlacement);
+  const [isDragging, setIsDragging] = useState(false);
 
   const spriteUrl = useMemo(() => {
     if (!sprites || !(sprites as SpriteInfo[]).length) return null;
@@ -234,6 +277,23 @@ function CharacterSprite({
     return spriteList[0]?.url ?? null;
   }, [sprites, expression]);
 
+  const sizeClass =
+    spriteCount >= 3
+      ? "max-h-[44vh] max-w-[42vw] md:max-w-[26vw]"
+      : spriteCount === 2
+        ? "max-h-[52vh] max-w-[52vw] md:max-w-[32vw]"
+        : "max-h-[60vh] max-w-[68vw] md:max-w-[38vw]";
+
+  useEffect(() => {
+    currentPlacementRef.current = currentPlacement;
+  }, [currentPlacement]);
+
+  useEffect(() => {
+    if (!isDragging) {
+      setCurrentPlacement(clampSpritePlacement(placement));
+    }
+  }, [isDragging, placement]);
+
   useEffect(() => {
     if (prevExpressionRef.current !== expression) {
       setActiveTransition(transition);
@@ -241,20 +301,84 @@ function CharacterSprite({
     }
   }, [expression, transition]);
 
+  useEffect(() => {
+    if (!editing && dragRef.current) {
+      dragRef.current = null;
+      setIsDragging(false);
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = dragRef.current;
+      const stage = stageRef.current;
+      if (!dragState || !stage || event.pointerId !== dragState.pointerId) return;
+
+      const dx = ((event.clientX - dragState.startX) / Math.max(stage.clientWidth, 1)) * 100;
+      const dy = ((event.clientY - dragState.startY) / Math.max(stage.clientHeight, 1)) * 100;
+      setCurrentPlacement(clampSpritePlacement({ x: dragState.origin.x + dx, y: dragState.origin.y + dy }));
+    };
+
+    const finishDrag = (event: PointerEvent) => {
+      const dragState = dragRef.current;
+      if (!dragState || event.pointerId !== dragState.pointerId) return;
+      dragRef.current = null;
+      setIsDragging(false);
+      onPlacementChange?.(characterId, currentPlacementRef.current);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", finishDrag);
+    window.addEventListener("pointercancel", finishDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finishDrag);
+      window.removeEventListener("pointercancel", finishDrag);
+    };
+  }, [characterId, isDragging, onPlacementChange, stageRef]);
+
   if (!spriteUrl) return null;
 
   const variant = TRANSITION_VARIANTS[activeTransition];
 
   return (
     <div
-      className={`absolute bottom-0 ${side === "left" ? "left-0 max-md:-left-[15%]" : "right-0 max-md:-right-[15%]"}`}
+      className={`absolute -translate-x-1/2 -translate-y-full select-none ${editing ? "pointer-events-auto" : "pointer-events-none"}`}
+      style={{
+        left: `${currentPlacement.x}%`,
+        top: `${currentPlacement.y}%`,
+        zIndex: isDragging ? 40 : zIndex,
+        touchAction: editing ? "none" : "auto",
+      }}
+      onPointerDown={(event) => {
+        if (!editing) return;
+        if (event.button !== 0 && event.pointerType !== "touch") return;
+        event.preventDefault();
+        event.stopPropagation();
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          origin: currentPlacementRef.current,
+        };
+        setIsDragging(true);
+      }}
     >
+      {editing && (
+        <div className="pointer-events-none absolute left-1/2 top-0 z-[2] -translate-x-1/2 -translate-y-full rounded-full border border-white/10 bg-black/65 px-2 py-1 text-[0.5625rem] font-semibold uppercase tracking-wide text-white/75 shadow-md">
+          {isDragging ? "Release to Save" : "Drag to Move"}
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         <motion.img
           key={`${characterId}-${expression}`}
           src={spriteUrl}
           alt={`${expression} sprite`}
-          className="max-h-[60vh] w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)]"
+          className={`${sizeClass} w-auto object-contain drop-shadow-[0_0_20px_rgba(0,0,0,0.5)] ${editing ? "cursor-grab active:cursor-grabbing" : ""}`}
           draggable={false}
           initial={variant.initial}
           animate={variant.animate}
