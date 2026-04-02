@@ -3618,6 +3618,8 @@ export async function generateRoutes(app: FastifyInstance) {
 
       const hasPostProcessingAgents = resolvedAgents.some((a) => a.phase === "post_processing");
       const combinedResponse = allResponses.join("\n\n");
+      // Illustration runs asynchronously so it doesn't block other agents
+      let pendingIllustration: Promise<void> | null = null;
       const hasPostWork = hasPostProcessingAgents || parallelResults.length > 0;
       if (hasPostWork && combinedResponse && !abortController.signal.aborted) {
         reply.raw.write(`data: ${JSON.stringify({ type: "agent_start", data: { phase: "post_generation" } })}\n\n`);
@@ -4243,125 +4245,135 @@ export async function generateRoutes(app: FastifyInstance) {
             const style = ((illData.style as string) ?? "").trim();
             const aspectRatio = ((illData.aspectRatio as string) ?? "portrait").trim();
 
+            // Always log what the illustrator decided
+            console.log(
+              `[illustrator] shouldGenerate=${shouldGenerate}, reason="${(illData.reason as string) ?? "none"}", prompt="${imagePrompt.slice(0, 500) || "(empty)"}"${illData.parseError ? " [JSON PARSE ERROR — raw: " + ((illData.raw as string) ?? "").slice(0, 300) + "]" : ""}`,
+            );
+
             if (shouldGenerate && imagePrompt) {
-              // Use the Illustrator agent's own connection (set in the Agents tab)
+              // Resolve connections: text LLM = connectionId, image gen = settings.imageConnectionId
               const illustratorAgent = resolvedAgents.find((a) => a.id === result.agentId || a.type === "illustrator");
-              const imgConnId = illustratorAgent?.connectionId ?? null;
+              const imgConnId = (illustratorAgent?.settings?.imageConnectionId as string) ?? null;
               if (imgConnId) {
-                try {
-                  const imgConnFull = await connections.getWithKey(imgConnId);
-                  if (!imgConnFull) throw new Error("Cannot resolve Illustrator agent connection");
+                // Queue image generation to run after the result loop so it doesn't
+                // block other agents (game state, trackers, consistency editor).
+                pendingIllustration = (async () => {
+                  try {
+                    const imgConnFull = await connections.getWithKey(imgConnId);
+                    if (!imgConnFull) throw new Error("Cannot resolve Illustrator agent connection");
 
-                  const { generateImage, saveImageToDisk } = await import("../services/image/image-generation.js");
-                  const { createGalleryStorage } = await import("../services/storage/gallery.storage.js");
-                  const galleryStore = createGalleryStorage(app.db);
+                    const { generateImage, saveImageToDisk } = await import("../services/image/image-generation.js");
+                    const { createGalleryStorage } = await import("../services/storage/gallery.storage.js");
+                    const galleryStore = createGalleryStorage(app.db);
 
-                  const imgModel = imgConnFull.model || "";
-                  const imgBaseUrl = imgConnFull.baseUrl || "https://image.pollinations.ai";
-                  const imgApiKey = imgConnFull.apiKey || "";
+                    const imgModel = imgConnFull.model || "";
+                    const imgBaseUrl = imgConnFull.baseUrl || "https://image.pollinations.ai";
+                    const imgApiKey = imgConnFull.apiKey || "";
 
-                  // Use selfie resolution from chat metadata if set, otherwise fall back to aspect ratio defaults
-                  const selfieRes = (chatMeta.selfieResolution as string) ?? "";
-                  const resParts = selfieRes.split("x").map(Number);
-                  const parsedW = resParts[0] ?? 0;
-                  const parsedH = resParts[1] ?? 0;
-                  let imgWidth: number;
-                  let imgHeight: number;
-                  if (parsedW > 0 && parsedH > 0) {
-                    imgWidth = parsedW;
-                    imgHeight = parsedH;
-                  } else if (aspectRatio === "portrait") {
-                    imgWidth = 512;
-                    imgHeight = 768;
-                  } else if (aspectRatio === "square") {
-                    imgWidth = 512;
-                    imgHeight = 512;
-                  } else {
-                    imgWidth = 768;
-                    imgHeight = 512;
-                  }
+                    // Use selfie resolution from chat metadata if set, otherwise fall back to aspect ratio defaults
+                    const selfieRes = (chatMeta.selfieResolution as string) ?? "";
+                    const resParts = selfieRes.split("x").map(Number);
+                    const parsedW = resParts[0] ?? 0;
+                    const parsedH = resParts[1] ?? 0;
+                    let imgWidth: number;
+                    let imgHeight: number;
+                    if (parsedW > 0 && parsedH > 0) {
+                      imgWidth = parsedW;
+                      imgHeight = parsedH;
+                    } else if (aspectRatio === "portrait") {
+                      imgWidth = 512;
+                      imgHeight = 768;
+                    } else if (aspectRatio === "square") {
+                      imgWidth = 512;
+                      imgHeight = 512;
+                    } else {
+                      imgWidth = 768;
+                      imgHeight = 512;
+                    }
 
-                  // Prepend style to the prompt for better results
-                  const fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
+                    // Prepend style to the prompt for better results
+                    const fullPrompt = style ? `${style}, ${imagePrompt}` : imagePrompt;
 
-                  const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, {
-                    prompt: fullPrompt,
-                    negativePrompt: negativePrompt || undefined,
-                    model: imgModel,
-                    width: imgWidth,
-                    height: imgHeight,
-                    comfyWorkflow: (imgConnFull as any).comfyuiWorkflow || undefined,
-                  });
-
-                  // Save to disk
-                  const filePath = saveImageToDisk(input.chatId, imageResult.base64, imageResult.ext);
-
-                  // Save to gallery
-                  const galleryEntry = await galleryStore.create({
-                    chatId: input.chatId,
-                    filePath,
-                    prompt: fullPrompt,
-                    provider: "image_generation",
-                    model: imgModel || "unknown",
-                    width: imgWidth,
-                    height: imgHeight,
-                  });
-
-                  // Attach to the assistant message
-                  const filename = filePath.split("/").pop()!;
-                  const imageUrl = `/api/gallery/file/${input.chatId}/${encodeURIComponent(filename)}`;
-                  if (messageId) {
-                    const msgRow = await chats.getMessage(messageId);
-                    const msgExtra = msgRow?.extra
-                      ? typeof msgRow.extra === "string"
-                        ? JSON.parse(msgRow.extra)
-                        : msgRow.extra
-                      : {};
-                    const existingAttachments = (msgExtra.attachments as any[]) ?? [];
-                    existingAttachments.push({
-                      type: "image",
-                      url: imageUrl,
-                      filename: `illustration.${imageResult.ext}`,
+                    console.log(`[illustrator] Starting image generation (${imgWidth}x${imgHeight})...`);
+                    const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, {
+                      prompt: fullPrompt,
+                      negativePrompt: negativePrompt || undefined,
+                      model: imgModel,
+                      width: imgWidth,
+                      height: imgHeight,
+                      comfyWorkflow: (imgConnFull as any).comfyuiWorkflow || undefined,
                     });
-                    await chats.updateMessageExtra(messageId, { attachments: existingAttachments });
-                  }
 
-                  // Notify client
-                  reply.raw.write(
-                    `data: ${JSON.stringify({
-                      type: "illustration",
-                      data: {
-                        messageId,
-                        imageUrl,
-                        prompt: fullPrompt,
-                        reason: illData.reason,
-                        galleryId: (galleryEntry as any)?.id,
-                      },
-                    })}\n\n`,
-                  );
-                  console.log(
-                    `[illustrator] Generated illustration: ${(illData.reason as string)?.slice(0, 80) ?? imagePrompt.slice(0, 80)}...`,
-                  );
-                } catch (illErr) {
-                  console.error("[illustrator] Image generation failed:", illErr);
-                  reply.raw.write(
-                    `data: ${JSON.stringify({
-                      type: "agent_error",
-                      data: {
-                        agentType: "illustrator",
-                        error: `Image generation failed: ${illErr instanceof Error ? illErr.message : String(illErr)}`,
-                      },
-                    })}\n\n`,
-                  );
-                }
+                    // Save to disk
+                    const filePath = saveImageToDisk(input.chatId, imageResult.base64, imageResult.ext);
+
+                    // Save to gallery
+                    const galleryEntry = await galleryStore.create({
+                      chatId: input.chatId,
+                      filePath,
+                      prompt: fullPrompt,
+                      provider: "image_generation",
+                      model: imgModel || "unknown",
+                      width: imgWidth,
+                      height: imgHeight,
+                    });
+
+                    // Attach to the assistant message
+                    const filename = filePath.split("/").pop()!;
+                    const imageUrl = `/api/gallery/file/${input.chatId}/${encodeURIComponent(filename)}`;
+                    if (messageId) {
+                      const msgRow = await chats.getMessage(messageId);
+                      const msgExtra = msgRow?.extra
+                        ? typeof msgRow.extra === "string"
+                          ? JSON.parse(msgRow.extra)
+                          : msgRow.extra
+                        : {};
+                      const existingAttachments = (msgExtra.attachments as any[]) ?? [];
+                      existingAttachments.push({
+                        type: "image",
+                        url: imageUrl,
+                        filename: `illustration.${imageResult.ext}`,
+                      });
+                      await chats.updateMessageExtra(messageId, { attachments: existingAttachments });
+                    }
+
+                    // Notify client
+                    reply.raw.write(
+                      `data: ${JSON.stringify({
+                        type: "illustration",
+                        data: {
+                          messageId,
+                          imageUrl,
+                          prompt: fullPrompt,
+                          reason: illData.reason,
+                          galleryId: (galleryEntry as any)?.id,
+                        },
+                      })}\n\n`,
+                    );
+                    console.log(
+                      `[illustrator] Generated illustration: ${(illData.reason as string)?.slice(0, 80) ?? imagePrompt.slice(0, 80)}...`,
+                    );
+                  } catch (illErr) {
+                    console.error("[illustrator] Image generation failed:", illErr);
+                    reply.raw.write(
+                      `data: ${JSON.stringify({
+                        type: "agent_error",
+                        data: {
+                          agentType: "illustrator",
+                          error: `Image generation failed: ${illErr instanceof Error ? illErr.message : String(illErr)}`,
+                        },
+                      })}\n\n`,
+                    );
+                  }
+                })();
               } else {
-                console.warn("[illustrator] Agent wants to generate but no connection set on the Illustrator agent");
+                console.warn("[illustrator] Agent wants to generate but no image generation connection configured");
                 reply.raw.write(
                   `data: ${JSON.stringify({
                     type: "agent_error",
                     data: {
                       agentType: "illustrator",
-                      error: "No connection set on the Illustrator agent. Go to Settings → Agents and assign an image generation connection to the Illustrator.",
+                      error: "No image generation connection set on the Illustrator agent. Go to Settings → Agents → Illustrator and assign an Image Generation Connection.",
                     },
                   })}\n\n`,
                 );
@@ -5199,6 +5211,15 @@ export async function generateRoutes(app: FastifyInstance) {
           );
         } catch (oocErr) {
           console.error(`[generate] Failed to post OOC messages:`, oocErr);
+        }
+      }
+
+      // Wait for illustration to finish before closing the SSE stream
+      if (pendingIllustration) {
+        try {
+          await pendingIllustration;
+        } catch {
+          /* errors already handled inside the promise */
         }
       }
 

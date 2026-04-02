@@ -479,6 +479,9 @@ export function inferImageSource(model: string, baseUrl: string): string {
   if (u.includes("blockentropy")) return "blockentropy";
   if (u.includes(":8188") || u.includes("comfyui")) return "comfyui";
   if (u.includes(":7860") && !u.includes("drawthings")) return "automatic1111";
+  // Gemini image models generate via chat completions (native or proxy)
+  if (m.includes("gemini") && m.includes("image")) return "gemini_image";
+  if (m.includes("imagen")) return "gemini_image";
   // OpenAI-compatible fallback (works for most proxies)
   return "openai";
 }

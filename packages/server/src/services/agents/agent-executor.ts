@@ -116,8 +116,8 @@ export async function executeAgent(
     const durationMs = Date.now() - startTime;
 
     console.log(`[agent] ${config.type} done (${responseText.length} chars, ${durationMs}ms)`);
-    if (isDebugAgentsEnabled()) {
-      console.log(`[agent] ${responseText}`);
+    if (isDebugAgentsEnabled() || config.type === "illustrator") {
+      console.log(`[agent] ${config.type} raw response: ${responseText.slice(0, 500)}`);
     }
 
     // Parse the result based on agent type

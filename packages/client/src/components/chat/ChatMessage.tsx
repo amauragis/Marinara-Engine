@@ -21,11 +21,13 @@ import {
 } from "lucide-react";
 import type { Message } from "@marinara-engine/shared";
 import { memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import type { CharacterMap } from "./ChatArea";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
 import { useUIStore } from "../../stores/ui.store";
 import { useTranslate } from "../../hooks/use-translate";
+import { api } from "../../lib/api-client";
 import DOMPurify from "dompurify";
 
 /** Isolated edit textarea — uncontrolled to avoid React re-renders on every keystroke. */
@@ -123,6 +125,8 @@ const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const HR_LINE_RE = /^(?:\*{3,}|-{3,})$/;
 /** Regex to match a standalone image line (entire line is just one image). */
 const MD_IMAGE_LINE_RE = /^!\[([^\]]*)\]\((https?:\/\/[^)]+)\)$/;
+/** Regex to match a plain image URL as the entire content. */
+const IMAGE_URL_RE = /^https?:\/\/\S+\.(?:gif|png|jpe?g|webp)(?:\?[^\s]*)?$/i;
 
 /**
  * Split text into heading / horizontal-rule and non-heading segments,
@@ -568,6 +572,18 @@ export const ChatMessage = memo(function ChatMessage({
   const isConversationStart = !!extra.isConversationStart;
   const thinking = extra.thinking as string | undefined;
 
+  // Remove an attachment from this message (keeps it in gallery)
+  const qc = useQueryClient();
+  const handleRemoveAttachment = useCallback(
+    async (index: number) => {
+      const current = (extra.attachments as any[]) ?? [];
+      const updated = current.filter((_: any, i: number) => i !== index);
+      await api.patch(`/chats/${message.chatId}/messages/${message.id}/extra`, { attachments: updated });
+      qc.invalidateQueries({ queryKey: ["chats", "messages", message.chatId] });
+    },
+    [extra.attachments, message.chatId, message.id, qc],
+  );
+
   // Model name display
   const _modelName = !isUser && showModelName ? (extra.generationInfo?.model ?? null) : null;
   const genInfo = !isUser && showModelName ? extra.generationInfo : null;
@@ -1003,6 +1019,33 @@ export const ChatMessage = memo(function ChatMessage({
               )}
             </div>
 
+            {/* Image attachments (illustrations, selfies) */}
+            {!editing && extra.attachments?.length > 0 && !IMAGE_URL_RE.test(message.content.trim()) && (
+              <div className="mt-1.5 flex flex-col items-center gap-2 px-3 pb-2">
+                {extra.attachments.map((att: any, i: number) =>
+                  att.type === "image" || att.type?.startsWith("image/") ? (
+                    <div key={i} className="group/att relative inline-block">
+                      <a href={att.url || att.data} target="_blank" rel="noopener noreferrer">
+                        <img
+                          src={att.url || att.data}
+                          alt={att.filename || att.name || "image"}
+                          className="max-h-80 max-w-full rounded-lg"
+                          loading="lazy"
+                        />
+                      </a>
+                      <button
+                        onClick={() => handleRemoveAttachment(i)}
+                        title="Remove from message"
+                        className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white/80 transition-opacity hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover/att:opacity-100"
+                      >
+                        <X size="0.875rem" />
+                      </button>
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            )}
+
             {/* Swipes */}
             {hasSwipes && (
               <div className="mari-message-swipes flex items-center gap-1.5 px-1 text-[0.625rem] text-white/40">
@@ -1260,6 +1303,33 @@ export const ChatMessage = memo(function ChatMessage({
               </>
             )}
           </div>
+
+          {/* Image attachments (illustrations, selfies) */}
+          {!editing && extra.attachments?.length > 0 && !IMAGE_URL_RE.test(message.content.trim()) && (
+            <div className="mt-1.5 flex flex-col items-center gap-2 px-3 pb-2">
+              {extra.attachments.map((att: any, i: number) =>
+                att.type === "image" || att.type?.startsWith("image/") ? (
+                  <div key={i} className="group/att relative inline-block">
+                    <a href={att.url || att.data} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={att.url || att.data}
+                        alt={att.filename || att.name || "image"}
+                        className="max-h-80 max-w-full rounded-lg"
+                        loading="lazy"
+                      />
+                    </a>
+                    <button
+                      onClick={() => handleRemoveAttachment(i)}
+                      title="Remove from message"
+                      className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white/80 transition-opacity hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover/att:opacity-100"
+                    >
+                      <X size="0.875rem" />
+                    </button>
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
 
           {/* Timestamp + model — only for last in a group or standalone */}
           {!isGrouped && (

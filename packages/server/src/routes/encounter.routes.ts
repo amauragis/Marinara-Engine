@@ -241,6 +241,7 @@ function buildInitPrompt(
   inst += `- statuses: format {"name":"Status","emoji":"💀","duration":X}\n`;
   inst += `- Use the player's stats/inventory from the context to populate their data.\n`;
   inst += `- Ensure HP values are realistic for the setting. Return ONLY the JSON.\n`;
+  inst += `- Write ALL text values (environment, descriptions, attack names, item names, etc.) in the same language the chat history is written in.\n`;
 
   msgs.push({ role: "user", content: inst });
   return msgs;
@@ -323,6 +324,7 @@ function buildActionPrompt(
   state += `Scale difficulty: powerful foes take multiple rounds, weak foes fall quickly.\n`;
   state += `Write the narrative in ${narrative.tense} tense ${narrative.person}-person ${narrative.narration} from ${narrative.pov}'s point of view.\n`;
   state += `Build novel prose, vary structures, avoid GPTisms and purple prose. No asterisks or em-dashes. Under 150 words. Do not play for ${personaName}.\n`;
+  state += `Write in the same language the chat history is written in.\n`;
 
   msgs.push({ role: "user", content: state });
   return msgs;
@@ -353,6 +355,7 @@ function buildSummaryPrompt(
   user += `Write in ${narrative.tense} tense ${narrative.person}-person ${narrative.narration} from ${narrative.pov}'s point of view.\n`;
   user += `Build novel prose, vary structures, avoid GPTisms and purple prose. Include dialogue from enemies/NPCs in direct quotes. Express ${personaName}'s actions using only indirect speech.\n`;
   user += `No asterisks, ellipses, or em-dashes. Explicit content allowed. Finish naturally.\n`;
+  user += `Write in the same language the combat log is written in.\n`;
 
   msgs.push({ role: "user", content: user });
   return msgs;

@@ -70,6 +70,8 @@ export async function generateImage(
       return generateComfyUI(baseUrl, request);
     case "automatic1111":
       return generateAutomatic1111(baseUrl, request);
+    case "gemini_image":
+      return generateViaChatCompletions(baseUrl, apiKey, request);
     default:
       // Fallback: try OpenAI-compatible endpoint
       return generateOpenAI(baseUrl, apiKey, request);
@@ -91,6 +93,9 @@ export function saveImageToDisk(chatId: string, base64: string, ext: string): st
 
 // ── Provider Implementations ──
 
+/** 2-minute timeout for image generation API calls */
+const IMAGE_GEN_TIMEOUT = 120_000;
+
 async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGenRequest): Promise<ImageGenResult> {
   const url = `${baseUrl.replace(/\/+$/, "")}/images/generations`;
   const body: Record<string, unknown> = {
@@ -108,6 +113,7 @@ async function generateOpenAI(baseUrl: string, apiKey: string, request: ImageGen
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {
@@ -132,7 +138,7 @@ async function generatePollinations(request: ImageGenRequest): Promise<ImageGenR
   if (request.negativePrompt) params.set("negative", request.negativePrompt);
 
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(request.prompt)}?${params}`;
-  const resp = await fetch(url);
+  const resp = await fetch(url, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
 
   if (!resp.ok) {
     throw new Error(`Pollinations image generation failed (${resp.status})`);
@@ -158,6 +164,7 @@ async function generateStability(baseUrl: string, apiKey: string, request: Image
       Accept: "image/*",
     },
     body: formData,
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {
@@ -190,6 +197,7 @@ async function generateTogetherAI(baseUrl: string, apiKey: string, request: Imag
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {
@@ -260,6 +268,7 @@ async function generateNovelAI(baseUrl: string, apiKey: string, request: ImageGe
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {
@@ -386,6 +395,7 @@ async function generateViaChatCompletions(
       stream: false,
       temperature: 0.7,
     }),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {
@@ -407,7 +417,7 @@ async function generateViaChatCompletions(
   }
 
   // Download the image
-  const imgResp = await fetch(imageUrl);
+  const imgResp = await fetch(imageUrl, { signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT) });
   if (!imgResp.ok) {
     throw new Error(`Failed to download generated image (${imgResp.status})`);
   }
@@ -508,6 +518,7 @@ async function generateComfyUI(baseUrl: string, request: ImageGenRequest): Promi
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: resolvedWorkflow }),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!queueResp.ok) {
@@ -587,6 +598,7 @@ async function generateAutomatic1111(baseUrl: string, request: ImageGenRequest):
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(IMAGE_GEN_TIMEOUT),
   });
 
   if (!resp.ok) {

@@ -385,8 +385,9 @@ function CombatLog() {
     let i = 0;
     const interval = setInterval(() => {
       if (i < pendingLogs.length) {
-        setEntries((prev) => [...prev, pendingLogs[i]]);
+        const entry = pendingLogs[i];
         i++;
+        if (entry) setEntries((prev) => [...prev, entry]);
       } else {
         clearInterval(interval);
         clearPendingLogs();
@@ -408,23 +409,26 @@ function CombatLog() {
       className="scrollbar-thin max-h-40 overflow-y-auto rounded-xl border border-white/5 bg-black/30 p-3"
     >
       <AnimatePresence>
-        {entries.map((e, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className={cn(
-              "mb-1 whitespace-pre-wrap text-xs leading-relaxed",
-              e.type === "system" && "italic text-white/30",
-              e.type === "player-action" && "font-semibold text-blue-300",
-              e.type === "enemy-action" && "text-red-300",
-              e.type === "party-action" && "text-emerald-300",
-              e.type === "narrative" && "text-white/70",
-            )}
-          >
-            {e.message}
-          </motion.div>
-        ))}
+        {entries.map(
+          (e, i) =>
+            e && (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                className={cn(
+                  "mb-1 whitespace-pre-wrap text-xs leading-relaxed",
+                  e.type === "system" && "italic text-white/30",
+                  e.type === "player-action" && "font-semibold text-blue-300",
+                  e.type === "enemy-action" && "text-red-300",
+                  e.type === "party-action" && "text-emerald-300",
+                  e.type === "narrative" && "text-white/70",
+                )}
+              >
+                {e.message}
+              </motion.div>
+            ),
+        )}
       </AnimatePresence>
     </div>
   );

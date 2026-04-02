@@ -3,9 +3,11 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
 import { Pencil, Trash2, Copy, RefreshCw, Eye, Brain, X, User, Languages } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn, copyToClipboard } from "../../lib/utils";
 import type { CharacterMap } from "./ChatArea";
 import { useTranslate } from "../../hooks/use-translate";
+import { api } from "../../lib/api-client";
 
 /** Build style object for name color (supports gradients). */
 function nameColorStyle(color?: string): React.CSSProperties | undefined {
@@ -322,6 +324,18 @@ export const ConversationMessage = memo(function ConversationMessage({
   const avatarUrl = isUser ? (personaInfo?.avatarUrl ?? null) : (charInfo?.avatarUrl ?? null);
   const displayName = isUser ? (personaInfo?.name ?? "You") : (charInfo?.name ?? "Assistant");
   const nameColor = isUser ? personaInfo?.nameColor : charInfo?.nameColor;
+
+  // Remove an attachment from this message (keeps it in gallery)
+  const qc = useQueryClient();
+  const handleRemoveAttachment = useCallback(
+    async (index: number) => {
+      const current = (message.extra.attachments as any[]) ?? [];
+      const updated = current.filter((_: any, i: number) => i !== index);
+      await api.patch(`/chats/${message.chatId}/messages/${message.id}/extra`, { attachments: updated });
+      qc.invalidateQueries({ queryKey: ["chats", "messages", message.chatId] });
+    },
+    [message.extra.attachments, message.chatId, message.id, qc],
+  );
 
   // Build name→character lookup for speaker tag resolution.
   // When multiple characters share the same name, prefer the one assigned to this message.
@@ -783,19 +797,28 @@ export const ConversationMessage = memo(function ConversationMessage({
           </div>
         )}
 
-        {/* Image attachments (selfies, etc.) — skip when content is already an image URL */}
+        {/* Image attachments (selfies, illustrations) — skip when content is already an image URL */}
         {extra.attachments && extra.attachments.length > 0 && !IMAGE_URL_RE.test(message.content.trim()) && (
-          <div className="mt-1.5 flex flex-wrap gap-2">
+          <div className="mt-1.5 flex flex-col items-center gap-2">
             {extra.attachments.map((att: any, i: number) =>
               att.type === "image" || att.type?.startsWith("image/") ? (
-                <a key={i} href={att.url || att.data} target="_blank" rel="noopener noreferrer">
-                  <img
-                    src={att.url || att.data}
-                    alt={att.filename || att.name || "image"}
-                    className="max-h-64 max-w-full sm:max-w-xs rounded-lg"
-                    loading="lazy"
-                  />
-                </a>
+                <div key={i} className="group/att relative inline-block">
+                  <a href={att.url || att.data} target="_blank" rel="noopener noreferrer">
+                    <img
+                      src={att.url || att.data}
+                      alt={att.filename || att.name || "image"}
+                      className="max-h-80 max-w-full rounded-lg"
+                      loading="lazy"
+                    />
+                  </a>
+                  <button
+                    onClick={() => handleRemoveAttachment(i)}
+                    title="Remove from message"
+                    className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white/80 transition-opacity hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover/att:opacity-100"
+                  >
+                    <X size="0.875rem" />
+                  </button>
+                </div>
               ) : null,
             )}
           </div>

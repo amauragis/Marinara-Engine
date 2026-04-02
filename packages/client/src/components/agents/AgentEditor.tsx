@@ -31,6 +31,7 @@ import {
   BookOpen,
   Upload,
   Loader2,
+  ImageIcon,
 } from "lucide-react";
 import { useDeleteAgent } from "../../hooks/use-agents";
 import { useLorebooks } from "../../hooks/use-lorebooks";
@@ -108,6 +109,7 @@ export function AgentEditor() {
   const [localDescription, setLocalDescription] = useState("");
   const [localPhase, setLocalPhase] = useState<AgentPhase>("post_processing");
   const [localConnectionId, setLocalConnectionId] = useState("");
+  const [localImageConnectionId, setLocalImageConnectionId] = useState("");
   const [localContextSize, setLocalContextSize] = useState<number | "">("");
   const [localRunInterval, setLocalRunInterval] = useState<number | "">("");
   const [localPrompt, setLocalPrompt] = useState("");
@@ -147,6 +149,7 @@ export function AgentEditor() {
           : dbConfig.settings
         : {};
       setLocalContextSize(settings.contextSize ?? "");
+      setLocalImageConnectionId(settings.imageConnectionId ?? "");
       setLocalRunInterval(settings.runInterval ?? "");
       setLocalInjectAsSection(settings.injectAsSection ?? false);
       setLocalEnabledTools(settings.enabledTools ?? DEFAULT_AGENT_TOOLS[dbConfig.type] ?? []);
@@ -159,6 +162,7 @@ export function AgentEditor() {
       setLocalDescription(builtIn.description);
       setLocalPhase(builtIn.phase);
       setLocalConnectionId("");
+      setLocalImageConnectionId("");
       setLocalContextSize("");
       setLocalRunInterval("");
       setLocalInjectAsSection(builtIn.defaultInjectAsSection ?? false);
@@ -173,6 +177,7 @@ export function AgentEditor() {
       setLocalDescription("");
       setLocalPhase("post_processing");
       setLocalConnectionId("");
+      setLocalImageConnectionId("");
       setLocalContextSize("");
       setLocalRunInterval("");
       setLocalInjectAsSection(false);
@@ -262,6 +267,7 @@ export function AgentEditor() {
         ...(localSpotifyClientId ? { spotifyClientId: localSpotifyClientId } : {}),
         ...(localSourceLorebookIds.length > 0 ? { sourceLorebookIds: localSourceLorebookIds } : {}),
         ...(localSourceFileIds.length > 0 ? { sourceFileIds: localSourceFileIds } : {}),
+        ...(localImageConnectionId ? { imageConnectionId: localImageConnectionId } : {}),
       },
     };
 
@@ -298,6 +304,7 @@ export function AgentEditor() {
     localDescription,
     localPhase,
     localConnectionId,
+    localImageConnectionId,
     localPrompt,
     localContextSize,
     localRunInterval,
@@ -526,6 +533,35 @@ export function AgentEditor() {
               active connection.
             </p>
           </FieldGroup>
+
+          {/* ── Image Generation Connection (Illustrator only) ── */}
+          {(agentDetailId === "illustrator" || dbConfig?.type === "illustrator") && (
+            <FieldGroup
+              label="Image Generation Connection"
+              icon={<ImageIcon size="0.875rem" className="text-[var(--primary)]" />}
+              help="The connection used to generate images. This should point to an image generation API (e.g. DALL-E, NovelAI, Stable Diffusion). The Connection Override above is used for the LLM that decides when and what to illustrate."
+            >
+              <select
+                value={localImageConnectionId}
+                onChange={(e) => {
+                  setLocalImageConnectionId(e.target.value);
+                  markDirty();
+                }}
+                className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+              >
+                <option value="">None (no image generation)</option>
+                {(connections as Array<{ id: string; name: string; provider: string }> | undefined)?.map((conn) => (
+                  <option key={conn.id} value={conn.id}>
+                    {conn.name} ({conn.provider})
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[0.625rem] text-[var(--muted-foreground)]">
+                The Illustrator uses two connections: the LLM above analyzes the scene and writes an image prompt,
+                then this connection generates the actual image from that prompt.
+              </p>
+            </FieldGroup>
+          )}
 
           {/* ── Context Size (hidden for Chat Summary — that uses the popover) ── */}
           {!isChatSummaryAgent && (
