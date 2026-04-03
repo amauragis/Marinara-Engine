@@ -197,10 +197,19 @@ export class OpenAIProvider extends BaseLLMProvider {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response body");
 
+    // Ensure aborting the signal cancels the reader (closes the TCP connection
+    // to the backend), even if undici doesn't propagate the abort automatically.
+    const onAbort = () => reader.cancel().catch(() => {});
+    if (options.signal) {
+      if (options.signal.aborted) { await reader.cancel().catch(() => {}); return; }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     const decoder = new TextDecoder();
     let buffer = "";
     let streamUsage: LLMUsage | undefined;
 
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -247,6 +256,9 @@ export class OpenAIProvider extends BaseLLMProvider {
           // Skip malformed JSON lines
         }
       }
+    }
+    } finally {
+      if (options.signal) options.signal.removeEventListener("abort", onAbort);
     }
     if (streamUsage) return streamUsage;
   }
@@ -772,6 +784,12 @@ export class OpenAIProvider extends BaseLLMProvider {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response body");
 
+    const onAbortCCR = () => reader.cancel().catch(() => {});
+    if (options.signal) {
+      if (options.signal.aborted) { await reader.cancel().catch(() => {}); return { content: null, toolCalls: [], finishReason: "stop", usage: undefined }; }
+      options.signal.addEventListener("abort", onAbortCCR, { once: true });
+    }
+
     const decoder = new TextDecoder();
     let sseBuffer = "";
     let content = "";
@@ -894,7 +912,7 @@ export class OpenAIProvider extends BaseLLMProvider {
         currentEvent = "";
       }
     }
-
+    if (options.signal) options.signal.removeEventListener("abort", onAbortCCR);
     // Check if we got tool calls
     if (functionCalls.length > 0) {
       finishReason = "tool_calls";

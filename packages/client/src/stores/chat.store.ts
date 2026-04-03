@@ -214,6 +214,13 @@ export const useChatStore = create<ChatState>()(
       if (streamingChatId) {
         const ctrl = abortControllers.get(streamingChatId);
         if (ctrl) ctrl.abort();
+        // Explicitly tell the server to abort — the SSE close event may not
+        // fire reliably, so this ensures the backend (e.g. KoboldCPP) stops.
+        fetch("/api/generate/abort", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId: streamingChatId }),
+        }).catch(() => {});
       }
     },
     appendStreamBuffer: (text) => set((state) => ({ streamBuffer: state.streamBuffer + text })),

@@ -171,8 +171,26 @@ export async function generateRoutes(app: FastifyInstance) {
 
     // ── Abort controller: cancel agents when client disconnects ──
     const abortController = new AbortController();
-    const onClose = () => abortController.abort();
+    // Register this generation so the /abort endpoint can cancel it
+    const activeGenerations = (app as any).activeGenerations as Map<string, { abortController: AbortController; backendUrl: string | null }>;
+    if (activeGenerations) {
+      activeGenerations.set(input.chatId, { abortController, backendUrl: baseUrl });
+    }
+
+    const onClose = () => {
+      console.log("[abort] Client disconnected — aborting generation");
+      abortController.abort();
+      if (activeGenerations) activeGenerations.delete(input.chatId);
+      if (baseUrl) {
+        const backendRoot = baseUrl.replace(/\/v1\/?$/, "");
+        fetch(backendRoot + "/api/extra/abort", {
+          method: "POST",
+          signal: AbortSignal.timeout(5000),
+        }).catch(() => {});
+      }
+    };
     req.raw.on("close", onClose);
+
 
     // ── SSE progress helper: tells the client what phase we're in ──
     const sendProgress = (phase: string) => {
@@ -5270,9 +5288,53 @@ export async function generateRoutes(app: FastifyInstance) {
       sendSseEvent(reply, { type: "error", data: message });
     } finally {
       req.raw.off("close", onClose);
+      if (activeGenerations) activeGenerations.delete(input.chatId);
       reply.raw.end();
     }
   });
+
+
+  // ── Active generation tracking for explicit abort ──
+  const activeGenerations = new Map<string, { abortController: AbortController; backendUrl: string | null }>();
+
+  // Expose the map so the route handler can register/unregister generations
+  app.decorate("activeGenerations", activeGenerations);
+
+  /**
+   * POST /api/generate/abort
+   * Explicitly abort an in-progress generation for a given chat.
+   */
+  app.post("/abort", async (req, reply) => {
+    const body = req.body as { chatId?: string };
+    const chatId = body?.chatId;
+    if (!chatId) return reply.status(400).send({ error: "chatId is required" });
+
+    const gen = activeGenerations.get(chatId);
+    if (!gen) return reply.send({ aborted: false, reason: "No active generation for this chat" });
+
+    console.log("[abort] Explicit abort requested for chat:", chatId);
+    gen.abortController.abort();
+
+    // Send abort to backend (KoboldCPP etc.)
+    if (gen.backendUrl) {
+      const backendRoot = gen.backendUrl.replace(/\/v1\/?$/, "");
+      const abortUrl = backendRoot + "/api/extra/abort";
+      console.log("[abort] Sending abort to backend:", abortUrl);
+      try {
+        await fetch(abortUrl, { method: "POST", signal: AbortSignal.timeout(5000) });
+        console.log("[abort] Backend abort sent successfully");
+      } catch (err) {
+        console.warn("[abort] Backend abort failed:", err);
+      }
+    }
+
+    activeGenerations.delete(chatId);
+    return reply.send({ aborted: true });
+  });
+
+
+
+
 
   await registerRetryAgentsRoute(app);
 }

@@ -162,6 +162,12 @@ export class GoogleProvider extends BaseLLMProvider {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response body");
 
+    const onAbort = () => reader.cancel().catch(() => {});
+    if (options.signal) {
+      if (options.signal.aborted) { await reader.cancel().catch(() => {}); return; }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     const decoder = new TextDecoder();
     let buffer = "";
     let streamUsage: LLMUsage | undefined;
@@ -171,6 +177,7 @@ export class GoogleProvider extends BaseLLMProvider {
     let responseText = "";
     let lastSignature: string | undefined;
 
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -215,6 +222,9 @@ export class GoogleProvider extends BaseLLMProvider {
           // Skip malformed lines
         }
       }
+    }
+    } finally {
+      if (options.signal) options.signal.removeEventListener("abort", onAbort);
     }
 
     // Reconstruct the canonical parts array for storage (thought signatures + summaries)

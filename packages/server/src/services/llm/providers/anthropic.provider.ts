@@ -127,12 +127,19 @@ export class AnthropicProvider extends BaseLLMProvider {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response body");
 
+    const onAbort = () => reader.cancel().catch(() => {});
+    if (options.signal) {
+      if (options.signal.aborted) { await reader.cancel().catch(() => {}); return; }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     const decoder = new TextDecoder();
     let buffer = "";
     let currentBlockType = "text"; // track whether we're in a thinking or text block
     let inputTokens = 0;
     let outputTokens = 0;
 
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -188,6 +195,9 @@ export class AnthropicProvider extends BaseLLMProvider {
           // Skip malformed lines
         }
       }
+    }
+    } finally {
+      if (options.signal) options.signal.removeEventListener("abort", onAbort);
     }
     if (inputTokens || outputTokens) {
       return { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens };
