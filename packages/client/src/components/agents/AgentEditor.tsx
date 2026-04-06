@@ -118,6 +118,7 @@ export function AgentEditor() {
   const [localSpotifyClientId, setLocalSpotifyClientId] = useState("");
   const [localSourceLorebookIds, setLocalSourceLorebookIds] = useState<string[]>([]);
   const [localSourceFileIds, setLocalSourceFileIds] = useState<string[]>([]);
+  const [localAutoGenerateAvatars, setLocalAutoGenerateAvatars] = useState(false);
   const [spotifyStatus, setSpotifyStatus] = useState<{
     connected: boolean;
     expired: boolean;
@@ -149,20 +150,33 @@ export function AgentEditor() {
           : dbConfig.settings
         : {};
       setLocalContextSize(settings.contextSize ?? "");
-      setLocalImageConnectionId(settings.imageConnectionId ?? "");
+      {
+        const saved = settings.imageConnectionId ?? "";
+        if (saved) {
+          setLocalImageConnectionId(saved);
+        } else {
+          const defaultImgConnDb = (connections as Array<{ id: string; provider: string }> | undefined)
+            ?.find((c) => c.provider === "image_generation");
+          setLocalImageConnectionId(defaultImgConnDb?.id ?? "");
+        }
+      }
       setLocalRunInterval(settings.runInterval ?? "");
       setLocalInjectAsSection(settings.injectAsSection ?? false);
       setLocalEnabledTools(settings.enabledTools ?? DEFAULT_AGENT_TOOLS[dbConfig.type] ?? []);
       setLocalSpotifyClientId(settings.spotifyClientId ?? "");
       setLocalSourceLorebookIds(settings.sourceLorebookIds ?? []);
       setLocalSourceFileIds(settings.sourceFileIds ?? []);
+      setLocalAutoGenerateAvatars(settings.autoGenerateAvatars ?? false);
       setLocalPrompt(dbConfig.promptTemplate || "");
     } else if (builtIn) {
       setLocalName(builtIn.name);
       setLocalDescription(builtIn.description);
       setLocalPhase(builtIn.phase);
       setLocalConnectionId("");
-      setLocalImageConnectionId("");
+      // Default image connection to the first image_generation provider when creating a new agent
+      const defaultImgConn = (connections as Array<{ id: string; provider: string }> | undefined)
+        ?.find((c) => c.provider === "image_generation");
+      setLocalImageConnectionId(defaultImgConn?.id ?? "");
       setLocalContextSize("");
       setLocalRunInterval("");
       setLocalInjectAsSection(builtIn.defaultInjectAsSection ?? false);
@@ -170,6 +184,7 @@ export function AgentEditor() {
       setLocalSpotifyClientId("");
       setLocalSourceLorebookIds([]);
       setLocalSourceFileIds([]);
+      setLocalAutoGenerateAvatars(false);
       setLocalPrompt("");
     } else {
       // Brand new custom agent — start empty
@@ -177,7 +192,9 @@ export function AgentEditor() {
       setLocalDescription("");
       setLocalPhase("post_processing");
       setLocalConnectionId("");
-      setLocalImageConnectionId("");
+      const defaultImgConnNew = (connections as Array<{ id: string; provider: string }> | undefined)
+        ?.find((c) => c.provider === "image_generation");
+      setLocalImageConnectionId(defaultImgConnNew?.id ?? "");
       setLocalContextSize("");
       setLocalRunInterval("");
       setLocalInjectAsSection(false);
@@ -185,11 +202,12 @@ export function AgentEditor() {
       setLocalSpotifyClientId("");
       setLocalSourceLorebookIds([]);
       setLocalSourceFileIds([]);
+      setLocalAutoGenerateAvatars(false);
       setLocalPrompt("");
     }
     setDirty(false);
     setSaveError(null);
-  }, [agentDetailId, dbConfig, builtIn]);
+  }, [agentDetailId, dbConfig, builtIn, connections]);
 
   // Fetch Spotify connection status when viewing a Spotify agent
   const isSpotifyAgent = agentDetailId === "spotify" || dbConfig?.type === "spotify";
@@ -268,6 +286,7 @@ export function AgentEditor() {
         ...(localSourceLorebookIds.length > 0 ? { sourceLorebookIds: localSourceLorebookIds } : {}),
         ...(localSourceFileIds.length > 0 ? { sourceFileIds: localSourceFileIds } : {}),
         ...(localImageConnectionId ? { imageConnectionId: localImageConnectionId } : {}),
+        ...(localAutoGenerateAvatars ? { autoGenerateAvatars: true } : {}),
       },
     };
 
@@ -313,6 +332,7 @@ export function AgentEditor() {
     localSpotifyClientId,
     localSourceLorebookIds,
     localSourceFileIds,
+    localAutoGenerateAvatars,
     dbConfig,
     builtIn,
     updateAgent,
@@ -560,6 +580,48 @@ export function AgentEditor() {
                 The Illustrator uses two connections: the LLM above analyzes the scene and writes an image prompt, then
                 this connection generates the actual image from that prompt.
               </p>
+            </FieldGroup>
+          )}
+
+          {/* ── NPC Avatar Generation (Character Tracker only) ── */}
+          {(agentDetailId === "character-tracker" || dbConfig?.type === "character-tracker") && (
+            <FieldGroup
+              label="Auto-Generate NPC Avatars"
+              icon={<Sparkles size="0.875rem" className="text-[var(--primary)]" />}
+              help="When enabled, the Character Tracker will automatically generate portrait images for NPCs that don't have an avatar, using their appearance description."
+            >
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localAutoGenerateAvatars}
+                  onChange={(e) => {
+                    setLocalAutoGenerateAvatars(e.target.checked);
+                    markDirty();
+                  }}
+                  className="rounded border-[var(--border)] bg-[var(--secondary)] text-[var(--primary)] focus:ring-[var(--ring)]"
+                />
+                <span className="text-sm">Generate avatar portraits for new NPCs</span>
+              </label>
+              {localAutoGenerateAvatars && (
+                <div className="mt-2">
+                  <label className="block text-xs text-[var(--muted-foreground)] mb-1">Image Generation Connection</label>
+                  <select
+                    value={localImageConnectionId}
+                    onChange={(e) => {
+                      setLocalImageConnectionId(e.target.value);
+                      markDirty();
+                    }}
+                    className="w-full rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  >
+                    <option value="">None (select a connection)</option>
+                    {(connections as Array<{ id: string; name: string; provider: string }> | undefined)?.map((conn) => (
+                      <option key={conn.id} value={conn.id}>
+                        {conn.name} ({conn.provider})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </FieldGroup>
           )}
 

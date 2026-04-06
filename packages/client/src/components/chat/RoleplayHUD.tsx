@@ -395,6 +395,7 @@ export function RoleplayHUD({
               }
               api.patch(`/chats/${chatId}/game-state`, { presentCharacters: chars }).catch(() => {});
             }}
+            chatId={chatId}
             layout={layout}
           />
         )}
@@ -813,10 +814,12 @@ function WidgetPopover({
 function CharactersWidget({
   characters,
   onUpdate,
+  chatId,
   layout = "top",
 }: {
   characters: PresentCharacter[];
   onUpdate: (chars: PresentCharacter[]) => void;
+  chatId: string;
   layout?: HudPosition;
 }) {
   const [open, setOpen] = useState(false);
@@ -854,7 +857,7 @@ function CharactersWidget({
         className="w-72 max-h-80 overflow-y-auto"
       >
         <Suspense fallback={<DeferredHUDPanelFallback label="Loading characters…" />}>
-          <CharactersPanel characters={characters} onUpdate={onUpdate} />
+          <CharactersPanel characters={characters} onUpdate={onUpdate} chatId={chatId} />
         </Suspense>
       </WidgetPopover>
     </div>

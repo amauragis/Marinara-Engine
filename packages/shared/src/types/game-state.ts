@@ -51,6 +51,8 @@ export interface PresentCharacter {
   appearance: string | null;
   /** Current clothing / outfit description */
   outfit: string | null;
+  /** Avatar image path (e.g., /api/avatars/file/<filename>) */
+  avatarPath?: string | null;
   /** Per-character custom fields */
   customFields: Record<string, string>;
   /** Per-character stats (HP, etc.) */

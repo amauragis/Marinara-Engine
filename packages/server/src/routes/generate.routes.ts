@@ -78,7 +78,7 @@ import {
 } from "./generate/generate-route-utils.js";
 import { registerRetryAgentsRoute } from "./generate/retry-agents-route.js";
 import { sendSseEvent, startSseReply, trySendSseEvent } from "./generate/sse.js";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
 /** Read a character's avatar from disk as base64, or return undefined if unavailable. */
@@ -1813,6 +1813,7 @@ export async function generateRoutes(app: FastifyInstance) {
         mesExample: string;
         firstMes: string;
         postHistoryInstructions: string;
+        avatarPath: string | null;
       }> = [];
       for (const cid of characterIds) {
         const charRow = await chars.getById(cid);
@@ -1835,6 +1836,7 @@ export async function generateRoutes(app: FastifyInstance) {
             mesExample: charData.mes_example ?? "",
             firstMes: charData.first_mes ?? "",
             postHistoryInstructions: charData.post_history_instructions ?? "",
+            avatarPath: (charRow.avatarPath as string) ?? null,
           });
         }
       }
@@ -1897,9 +1899,8 @@ export async function generateRoutes(app: FastifyInstance) {
               const rpg = pStats.rpgStats as {
                 attributes: Array<{ name: string; value: number }>;
                 hp: { value: number; max: number };
-                mp: { value: number; max: number };
               };
-              const rpgLines = [`Max HP: ${rpg.hp.max}`, `Max MP: ${rpg.mp.max}`];
+              const rpgLines = [`Max HP: ${rpg.hp.max}`];
               for (const attr of rpg.attributes) {
                 rpgLines.push(`${attr.name}: ${attr.value}`);
               }
@@ -4275,9 +4276,97 @@ export async function generateRoutes(app: FastifyInstance) {
             try {
               const ctData = result.data as Record<string, unknown>;
               const chars = (ctData.presentCharacters as any[]) ?? [];
+
+              // ── Enrich with avatar paths ──
+              // 1. Match against known character records in this chat
+              // 2. Fall back to stored NPC avatars (per-chat generated/uploaded)
+              const NPC_AVATAR_DIR = join(DATA_DIR, "avatars", "npc");
+              for (const char of chars) {
+                if (char.avatarPath) continue; // already set
+                const name = (char.name as string) ?? "";
+                // Try matching against the chat's character cards (case-insensitive)
+                const matched = charInfo.find((c) => c.name.toLowerCase() === name.toLowerCase());
+                if (matched?.avatarPath) {
+                  char.avatarPath = matched.avatarPath;
+                  continue;
+                }
+                // Try loading a stored NPC avatar from disk
+                const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+                if (safeName) {
+                  const npcAvatarPath = join(NPC_AVATAR_DIR, input.chatId, `${safeName}.png`);
+                  if (existsSync(npcAvatarPath)) {
+                    char.avatarPath = `/api/avatars/npc/${input.chatId}/${safeName}.png`;
+                  }
+                }
+              }
+
               console.log(
                 `[generate] character-tracker: ${chars.length} characters to persist (msg=${messageId}, swipe=${targetSwipeIndex})`,
               );
+
+              // ── Auto-generate NPC avatars if enabled ──
+              const charTrackerAgent = resolvedAgents.find((a) => a.type === "character-tracker");
+              const autoGenAvatars = !!(charTrackerAgent?.settings?.autoGenerateAvatars);
+              const npcImgConnId = (charTrackerAgent?.settings?.imageConnectionId as string) ?? null;
+              if (autoGenAvatars && npcImgConnId) {
+                const charsNeedingAvatars = chars.filter(
+                  (c: any) => !c.avatarPath && (c.name as string) && (c.appearance as string),
+                );
+                if (charsNeedingAvatars.length > 0) {
+                  // Fire-and-forget: generate avatars in background so we don't block
+                  (async () => {
+                    try {
+                      const imgConnFull = await connections.getWithKey(npcImgConnId);
+                      if (!imgConnFull) return;
+                      const { generateImage } = await import("../services/image/image-generation.js");
+                      const imgModel = imgConnFull.model || "";
+                      const imgBaseUrl = imgConnFull.baseUrl || "https://image.pollinations.ai";
+                      const imgApiKey = imgConnFull.apiKey || "";
+
+                      for (const npc of charsNeedingAvatars) {
+                        try {
+                          const npcName = npc.name as string;
+                          const appearance = (npc.appearance as string) || "";
+                          const outfit = (npc.outfit as string) || "";
+                          const prompt = `Portrait of ${npcName}, ${appearance}${outfit ? `, wearing ${outfit}` : ""}. Character portrait, head and shoulders, detailed face, high quality`.slice(0, 1000);
+
+                          const imageResult = await generateImage(imgModel, imgBaseUrl, imgApiKey, {
+                            prompt,
+                            model: imgModel,
+                            width: 512,
+                            height: 512,
+                          });
+
+                          // Save to NPC avatars directory
+                          const safeName = npcName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+                          const npcDir = join(NPC_AVATAR_DIR, input.chatId);
+                          if (!existsSync(npcDir)) mkdirSync(npcDir, { recursive: true });
+                          writeFileSync(join(npcDir, `${safeName}.png`), Buffer.from(imageResult.base64, "base64"));
+
+                          // Update the character's avatarPath and stream to client
+                          npc.avatarPath = `/api/avatars/npc/${input.chatId}/${safeName}.png`;
+                          console.log(`[character-tracker] Generated avatar for NPC "${npcName}"`);
+                        } catch (err) {
+                          console.warn(`[character-tracker] Failed to generate avatar for "${npc.name}":`, err);
+                        }
+                      }
+
+                      // Re-persist with avatar paths and notify client
+                      await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {
+                        presentCharacters: chars,
+                      });
+                      try {
+                        reply.raw.write(
+                          `data: ${JSON.stringify({ type: "game_state_patch", data: { presentCharacters: chars } })}\n\n`,
+                        );
+                      } catch { /* stream closed */ }
+                    } catch (err) {
+                      console.warn(`[character-tracker] Avatar generation error:`, err);
+                    }
+                  })();
+                }
+              }
+
               const updated = await gameStateStore.updateByMessage(messageId, targetSwipeIndex, input.chatId, {
                 presentCharacters: chars,
               });

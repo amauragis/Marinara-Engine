@@ -639,7 +639,6 @@ function buildLoreBlock(context: AgentContext): string {
       const rpg = context.persona.rpgStats;
       parts.push(`RPG Stats:`);
       parts.push(`- Max HP: ${rpg.hp.max}`);
-      parts.push(`- Max MP: ${rpg.mp.max}`);
       if (rpg.attributes.length > 0) {
         parts.push(`Attributes:`);
         for (const attr of rpg.attributes) {

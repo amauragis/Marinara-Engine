@@ -174,7 +174,6 @@ function formatRPGStats(rpgStats: RPGStatsConfig | undefined): string {
   if (!rpgStats?.enabled) return "";
   const lines: string[] = [];
   lines.push(`Max HP: ${rpgStats.hp.max}`);
-  lines.push(`Max MP: ${rpgStats.mp.max}`);
   if (rpgStats.attributes.length > 0) {
     lines.push(rpgStats.attributes.map((a) => `${a.name}: ${a.value}`).join(", "));
   }

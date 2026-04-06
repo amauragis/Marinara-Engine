@@ -3,8 +3,10 @@
 // ──────────────────────────────────────────────
 import { useState, useCallback, useRef, useEffect, memo, useMemo, type ReactNode } from "react";
 import { Pencil, Trash2, Copy, RefreshCw, Eye, Brain, X, User, Languages } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import type { Message } from "@marinara-engine/shared";
 import { cn, copyToClipboard } from "../../lib/utils";
+import { chatKeys } from "../../hooks/use-chats";
 import type { CharacterMap } from "./ChatArea";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
@@ -328,16 +330,36 @@ export const ConversationMessage = memo(function ConversationMessage({
   const displayName = isUser ? (personaInfo?.name ?? "You") : (charInfo?.name ?? "Assistant");
   const nameColor = isUser ? personaInfo?.nameColor : charInfo?.nameColor;
 
+  const extra = useMemo(() => {
+    if (!message.extra) return {};
+    return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
+  }, [message.extra]);
+
   // Remove an attachment from this message (keeps it in gallery)
   const qc = useQueryClient();
   const handleRemoveAttachment = useCallback(
     async (index: number) => {
-      const current = (message.extra.attachments as any[]) ?? [];
+      const current = (extra.attachments as any[]) ?? [];
       const updated = current.filter((_: any, i: number) => i !== index);
+      // Optimistic: update the infinite query cache immediately so the image disappears
+      const msgKey = chatKeys.messages(message.chatId);
+      qc.setQueryData<InfiniteData<Message[]>>(msgKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) =>
+            page.map((m) => {
+              if (m.id !== message.id) return m;
+              const ex = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
+              return { ...m, extra: { ...ex, attachments: updated } } as Message;
+            }),
+          ),
+        };
+      });
       await api.patch(`/chats/${message.chatId}/messages/${message.id}/extra`, { attachments: updated });
-      qc.invalidateQueries({ queryKey: ["chats", "messages", message.chatId] });
+      qc.invalidateQueries({ queryKey: msgKey });
     },
-    [message.extra.attachments, message.chatId, message.id, qc],
+    [extra.attachments, message.chatId, message.id, qc],
   );
 
   // Build name→character lookup for speaker tag resolution.
@@ -418,10 +440,6 @@ export const ConversationMessage = memo(function ConversationMessage({
     prevContentRef.current = message.content;
   }, [message.content, segmentCount]);
 
-  const extra = useMemo(() => {
-    if (!message.extra) return {};
-    return typeof message.extra === "string" ? JSON.parse(message.extra) : message.extra;
-  }, [message.extra]);
   const thinking = extra?.thinking;
 
   // Actions

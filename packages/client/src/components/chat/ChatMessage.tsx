@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import type { Message } from "@marinara-engine/shared";
 import { memo, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { chatKeys } from "../../hooks/use-chats";
 import { useShallow } from "zustand/react/shallow";
 import type { CharacterMap } from "./ChatArea";
 import { useApplyRegex } from "../../hooks/use-apply-regex";
@@ -370,8 +371,9 @@ function renderContent(
     : normalized.replace(SPEAKER_TAG_RE, "$2");
 
   // Convert newlines to <br> with compact spacing for HTML content,
-  // but preserve newlines inside <style> blocks (they're harmless in CSS
-  // and injecting <br> tags would corrupt the stylesheet).
+  // but preserve newlines inside <svg> and <style> blocks — injecting
+  // <br> into SVG foreign content breaks the HTML parser's namespace
+  // handling, and corrupts stylesheets.
   // Also skip newlines that sit between HTML tags (source formatting only).
   // First, protect newlines inside attribute values (e.g. multi-line style="")
   // by temporarily replacing them with a placeholder.
@@ -381,8 +383,8 @@ function renderContent(
     (_m, before: string, attr: string, after: string) => before + attr.replace(/\n/g, ATTR_NL_PLACEHOLDER) + after,
   );
   const withBreaks = attrProtected
-    .replace(/(<style[\s\S]*?<\/style>)|(>\s*)\n(\s*<)|\n/gi, (m, styleBlock, pre, post) =>
-      styleBlock ? styleBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
+    .replace(/(<svg[\s\S]*?<\/svg>)|(<style[\s\S]*?<\/style>)|(>\s*)\n(\s*<)|\n/gi, (_m, svgBlock, styleBlock, pre, post) =>
+      svgBlock ? svgBlock : styleBlock ? styleBlock : pre ? `${pre}${post}` : '<br style="display:block;margin:0.2em 0">',
     )
     .replace(new RegExp(ATTR_NL_PLACEHOLDER, "g"), "\n");
 
@@ -395,7 +397,10 @@ function renderContent(
   );
 
   // Content has HTML — sanitize and render it
+  // DOMPurify disallows <animate> by default (conservative SVG list).
+  // It's safe — only animates presentation attributes, no script execution.
   const clean = DOMPurify.sanitize(withImages, {
+    ADD_TAGS: ["animate"],
     ADD_ATTR: ["style", "class"],
     ALLOW_DATA_ATTR: true,
   });
@@ -608,8 +613,23 @@ export const ChatMessage = memo(function ChatMessage({
     async (index: number) => {
       const current = (extra.attachments as any[]) ?? [];
       const updated = current.filter((_: any, i: number) => i !== index);
+      // Optimistic: update the infinite query cache immediately so the image disappears
+      const msgKey = chatKeys.messages(message.chatId);
+      qc.setQueryData<InfiniteData<Message[]>>(msgKey, (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) =>
+            page.map((m) => {
+              if (m.id !== message.id) return m;
+              const ex = typeof m.extra === "string" ? JSON.parse(m.extra) : (m.extra ?? {});
+              return { ...m, extra: { ...ex, attachments: updated } } as Message;
+            }),
+          ),
+        };
+      });
       await api.patch(`/chats/${message.chatId}/messages/${message.id}/extra`, { attachments: updated });
-      qc.invalidateQueries({ queryKey: ["chats", "messages", message.chatId] });
+      qc.invalidateQueries({ queryKey: msgKey });
     },
     [extra.attachments, message.chatId, message.id, qc],
   );

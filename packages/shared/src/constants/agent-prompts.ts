@@ -339,13 +339,13 @@ Instructions:
 1. Use inference. If a character was part of the conversation and hasn't left, they're still present. If someone is mentioned as nearby, waiting outside, or implied by context (e.g., a shopkeeper in a shop scene), include them.
   1a. Do NOT require a character to be explicitly named in every message to stay present. Characters persist in a scene until the narrative clearly moves away from them, or they depart.
   1b. Characters who clearly left, were dismissed, or are no longer in the scene should be removed.
-2. Track HP, MP, and any other RPG stats defined on the character card; adjust values based on narrative events (combat damage, healing, mana usage, etc.). Use the card's initial values as maximums.
+2. Track HP and any other RPG stats defined on the character card; adjust values based on narrative events (combat damage, healing, etc.). Use the card's initial values as maximums.
 3. Fill in appearance and outfit from the character's description or card if not mentioned in the current message. Don't leave them null just because this specific message didn't repeat the description.
 4. Preserve continuity with the previous state.
 5. If a new character enters the scene, add them with full details immediately.`,
 
   /* ────────────────────────────────────────── */
-  "persona-stats": `Track the PLAYER PERSONA's needs and condition bars. These represent physical and mental well-being, NOT combat stats (HP, MP, Strength are handled by the World State agent).
+  "persona-stats": `Track the PLAYER PERSONA's needs and condition bars. These represent physical and mental well-being, NOT combat stats (HP, Strength are handled by the World State agent).
 CRITICAL! Custom Stat Bars:
 Check the <user_persona> section for "Configured persona stat bars:". If custom bars are listed there, you MUST use ONLY those exact bars — same names, same colors, same max values. Do NOT add extra bars, do NOT rename them, do NOT replace them with defaults. Output exactly the bars the user configured, no more and no less.
 Only if NO custom bars are listed in <user_persona> should you fall back to defaults: Satiety, Energy, Hygiene, and Morale.

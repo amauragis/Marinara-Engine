@@ -421,6 +421,11 @@ strong {
   color: #c3c2c2;
 }
 
+/* Hide <style> text inside inline SVGs (browser renders CSS text as visible SVG content) */
+.mari-message-content svg style {
+  display: none;
+}
+
 /* Images inside chat messages */
 .mari-message-content img {
   max-width: 100%;

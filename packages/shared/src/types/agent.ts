@@ -107,7 +107,6 @@ export interface AgentContext {
       enabled: boolean;
       attributes: Array<{ name: string; value: number }>;
       hp: { value: number; max: number };
-      mp: { value: number; max: number };
     };
   } | null;
   /** The agent's own persistent memory (key-value) */
@@ -251,7 +250,7 @@ export const BUILT_IN_AGENTS: BuiltInAgentMeta[] = [
     id: "character-tracker",
     name: "Character Tracker",
     description:
-      "Tracks which characters are present in the scene, their mood, actions, appearance, outfit, thoughts, and per-character stats (HP, MP, etc.).",
+      "Tracks which characters are present in the scene, their mood, actions, appearance, outfit, thoughts, and per-character stats (HP, etc.).",
     phase: "post_processing",
     enabledByDefault: false,
     defaultInjectAsSection: true,

@@ -10,6 +10,9 @@ import { wrapContent } from "../services/prompt/format-engine.js";
 import { newId } from "../utils/id-generator.js";
 import { characters } from "../db/schema/index.js";
 import { eq, inArray } from "drizzle-orm";
+import { existsSync } from "fs";
+import { join } from "path";
+import { DATA_DIR } from "../utils/data-dir.js";
 
 export async function chatsRoutes(app: FastifyInstance) {
   const storage = createChatsStorage(app.db);
@@ -201,9 +204,46 @@ export async function chatsRoutes(app: FastifyInstance) {
     const usedFallback = !row;
     if (!row) row = await gameStateStore.getLatest(req.params.id);
     if (!row) return reply.send(null);
-    const presentCharacters = JSON.parse((row.presentCharacters as string) ?? "[]");
+    const presentCharacters = JSON.parse((row.presentCharacters as string) ?? "[]") as Array<Record<string, unknown>>;
     const playerStats = row.playerStats ? JSON.parse(row.playerStats as string) : null;
     const personaStats = row.personaStats ? JSON.parse(row.personaStats as string) : null;
+
+    // ── Enrich present characters with avatar paths ──
+    // Match NPC names against the chat's known character cards, then fall back to stored NPC avatars on disk.
+    const charsNeedingAvatar = presentCharacters.filter((c) => !c.avatarPath && c.name);
+    if (charsNeedingAvatar.length > 0) {
+      const chat = await storage.getById(req.params.id);
+      const chatCharIds: string[] = (() => {
+        try { return JSON.parse((chat?.characterIds as string) ?? "[]"); }
+        catch { return []; }
+      })();
+      // Build a name → avatarPath map from the chat's character records
+      const nameToAvatar = new Map<string, string>();
+      if (chatCharIds.length > 0) {
+        const charRows = await app.db.select({ id: characters.id, data: characters.data, avatarPath: characters.avatarPath })
+          .from(characters).where(inArray(characters.id, chatCharIds));
+        for (const cr of charRows) {
+          try {
+            const d = typeof cr.data === "string" ? JSON.parse(cr.data) : cr.data;
+            if (d?.name && cr.avatarPath) nameToAvatar.set((d.name as string).toLowerCase(), cr.avatarPath as string);
+          } catch { /* skip */ }
+        }
+      }
+      const NPC_AVATAR_DIR = join(DATA_DIR, "avatars", "npc");
+      for (const char of charsNeedingAvatar) {
+        const name = char.name as string;
+        // 1. Try matching a known character card by name
+        const knownAvatar = nameToAvatar.get(name.toLowerCase());
+        if (knownAvatar) { char.avatarPath = knownAvatar; continue; }
+        // 2. Try loading a stored NPC avatar from disk
+        const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+        if (safeName) {
+          const npcPath = join(NPC_AVATAR_DIR, req.params.id, `${safeName}.png`);
+          if (existsSync(npcPath)) char.avatarPath = `/api/avatars/npc/${req.params.id}/${safeName}.png`;
+        }
+      }
+    }
+
     return {
       id: row.id,
       chatId: row.chatId,
@@ -709,9 +749,8 @@ export async function chatsRoutes(app: FastifyInstance) {
                 const rpg = personaStats.rpgStats as {
                   attributes: Array<{ name: string; value: number }>;
                   hp: { value: number; max: number };
-                  mp: { value: number; max: number };
                 };
-                const rpgLines = [`Max HP: ${rpg.hp.max}`, `Max MP: ${rpg.mp.max}`];
+                const rpgLines = [`Max HP: ${rpg.hp.max}`];
                 for (const attr of rpg.attributes) {
                   rpgLines.push(`${attr.name}: ${attr.value}`);
                 }

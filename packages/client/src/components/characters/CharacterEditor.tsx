@@ -1364,7 +1364,6 @@ const DEFAULT_RPG_STATS: RPGStatsConfig = {
     { name: "CHA", value: 10 },
   ],
   hp: { value: 100, max: 100 },
-  mp: { value: 50, max: 50 },
 };
 
 function StatsTab({
@@ -1419,40 +1418,21 @@ function StatsTab({
 
       {stats.enabled && (
         <>
-          {/* HP / MP */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-red-500" />
-                <span className="text-xs font-semibold">Hit Points (HP)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
-                <input
-                  type="number"
-                  value={stats.hp.max}
-                  onChange={(e) => update({ hp: { ...stats.hp, max: parseInt(e.target.value) || 1 } })}
-                  className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
-                  min={1}
-                />
-              </div>
+          {/* HP */}
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-red-500" />
+              <span className="text-xs font-semibold">Hit Points (HP)</span>
             </div>
-
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-blue-500" />
-                <span className="text-xs font-semibold">Mana Points (MP)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
-                <input
-                  type="number"
-                  value={stats.mp.max}
-                  onChange={(e) => update({ mp: { ...stats.mp, max: parseInt(e.target.value) || 1 } })}
-                  className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
-                  min={1}
-                />
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
+              <input
+                type="number"
+                value={stats.hp.max}
+                onChange={(e) => update({ hp: { ...stats.hp, max: parseInt(e.target.value) || 1 } })}
+                className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
+                min={1}
+              />
             </div>
           </div>
 
@@ -1503,8 +1483,8 @@ function StatsTab({
             <h4 className="mb-1.5 text-xs font-semibold">How stats work</h4>
             <ul className="space-y-1 text-[0.6875rem] text-[var(--muted-foreground)]">
               <li>
-                &bull; <strong className="text-[var(--foreground)]">HP &amp; MP</strong> — Injected into the prompt so
-                the AI knows the character&apos;s current health and mana.
+                &bull; <strong className="text-[var(--foreground)]">HP</strong> — Injected into the prompt so
+                the AI knows the character&apos;s current health.
               </li>
               <li>
                 &bull; <strong className="text-[var(--foreground)]">Attributes</strong> — Custom stats (STR, DEX, etc.)

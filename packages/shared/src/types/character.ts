@@ -59,8 +59,6 @@ export interface RPGStatsConfig {
   attributes: Array<{ name: string; value: number }>;
   /** Hit Points */
   hp: { value: number; max: number };
-  /** Magic/Mana Points */
-  mp: { value: number; max: number };
 }
 
 /** Depth-injected prompt attached to a character. */

@@ -525,7 +525,6 @@ interface PersonaRPGStats {
   enabled: boolean;
   attributes: PersonaRPGAttribute[];
   hp: { value: number; max: number };
-  mp: { value: number; max: number };
 }
 
 interface PersonaStatsData {
@@ -545,7 +544,6 @@ const DEFAULT_RPG_STATS: PersonaRPGStats = {
     { name: "CHA", value: 10 },
   ],
   hp: { value: 100, max: 100 },
-  mp: { value: 50, max: 50 },
 };
 
 const DEFAULT_PERSONA_STATS: PersonaStatsData = {
@@ -715,7 +713,7 @@ function PersonaStatsTab({
       <div className="border-t border-[var(--border)] pt-6">
         <SectionHeader
           title="RPG Attributes"
-          subtitle="Define your persona's RPG stats (STR, DEX, etc.), HP, and MP — just like character cards. Tracked via Persona Stats in the game state."
+          subtitle="Define your persona's RPG stats (STR, DEX, etc.) and HP — just like character cards. Tracked via Persona Stats in the game state."
         />
 
         <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -735,40 +733,21 @@ function PersonaStatsTab({
 
         {rpgStats.enabled && (
           <>
-            {/* HP / MP */}
-            <div className="mt-4 grid grid-cols-2 gap-4">
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-red-500" />
-                  <span className="text-xs font-semibold">Hit Points (HP)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
-                  <input
-                    type="number"
-                    value={rpgStats.hp.max}
-                    onChange={(e) => updateRpg({ hp: { ...rpgStats.hp, max: parseInt(e.target.value) || 1 } })}
-                    className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
-                    min={1}
-                  />
-                </div>
+            {/* HP */}
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-2 rounded-full bg-red-500" />
+                <span className="text-xs font-semibold">Hit Points (HP)</span>
               </div>
-
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-blue-500" />
-                  <span className="text-xs font-semibold">Mana Points (MP)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
-                  <input
-                    type="number"
-                    value={rpgStats.mp.max}
-                    onChange={(e) => updateRpg({ mp: { ...rpgStats.mp, max: parseInt(e.target.value) || 1 } })}
-                    className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
-                    min={1}
-                  />
-                </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--muted-foreground)]">Max:</span>
+                <input
+                  type="number"
+                  value={rpgStats.hp.max}
+                  onChange={(e) => updateRpg({ hp: { ...rpgStats.hp, max: parseInt(e.target.value) || 1 } })}
+                  className="w-20 rounded-lg border border-[var(--border)] bg-[var(--input)] px-2 py-1.5 text-center text-sm"
+                  min={1}
+                />
               </div>
             </div>
 
@@ -819,8 +798,8 @@ function PersonaStatsTab({
               <h4 className="mb-1.5 text-xs font-semibold">How RPG attributes work</h4>
               <ul className="space-y-1 text-[0.6875rem] text-[var(--muted-foreground)]">
                 <li>
-                  &bull; <strong className="text-[var(--foreground)]">HP &amp; MP</strong> — Injected into the prompt so
-                  the AI knows your persona&apos;s current health and mana.
+                  &bull; <strong className="text-[var(--foreground)]">HP</strong> — Injected into the prompt so
+                  the AI knows your persona&apos;s current health.
                 </li>
                 <li>
                   &bull; <strong className="text-[var(--foreground)]">Attributes</strong> — Custom stats (STR, DEX,

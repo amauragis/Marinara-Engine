@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CalendarDays,
   CheckCircle2,
   Circle,
   Clock,
   CloudSun,
+  ImagePlus,
   MapPin,
   Package,
   Pencil,
   Plus,
   Scroll,
+  Sparkles,
   SlidersHorizontal,
   Swords,
   Target,
@@ -18,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { api } from "../../lib/api-client";
+import { useAgentConfigs, useUpdateAgent, type AgentConfigRow } from "../../hooks/use-agents";
 import type {
   CharacterStat,
   CustomTrackerField,
@@ -411,9 +415,58 @@ export function PersonaStatsPanel({ bars, onUpdate }: PersonaStatsPanelProps) {
 interface CharactersPanelProps {
   characters: PresentCharacter[];
   onUpdate: (chars: PresentCharacter[]) => void;
+  chatId?: string;
 }
 
-export function CharactersPanel({ characters, onUpdate }: CharactersPanelProps) {
+export function CharactersPanel({ characters, onUpdate, chatId }: CharactersPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadIdx, setUploadIdx] = useState<number | null>(null);
+
+  // ── Auto-generate toggle ──
+  const { data: agentConfigs } = useAgentConfigs();
+  const updateAgent = useUpdateAgent();
+  const trackerConfig = useMemo(() => {
+    if (!agentConfigs) return null;
+    return (agentConfigs as AgentConfigRow[]).find((a) => a.type === "character-tracker") ?? null;
+  }, [agentConfigs]);
+  const trackerSettings = useMemo(() => {
+    if (!trackerConfig?.settings) return {} as Record<string, unknown>;
+    try { return typeof trackerConfig.settings === "string" ? JSON.parse(trackerConfig.settings) : trackerConfig.settings; }
+    catch { return {} as Record<string, unknown>; }
+  }, [trackerConfig]);
+  const autoGenEnabled = !!(trackerSettings as Record<string, unknown>).autoGenerateAvatars;
+  const toggleAutoGenerate = useCallback(() => {
+    if (!trackerConfig) return;
+    const newVal = !autoGenEnabled;
+    const { autoGenerateAvatars: _, ...rest } = trackerSettings as Record<string, unknown>;
+    const newSettings = newVal ? { ...rest, autoGenerateAvatars: true } : rest;
+    updateAgent.mutate({ id: trackerConfig.id, settings: newSettings });
+  }, [trackerConfig, autoGenEnabled, trackerSettings, updateAgent]);
+
+  const handleAvatarUpload = useCallback(
+    async (idx: number, file: File) => {
+      const char = characters[idx];
+      if (!char || !chatId) return;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        try {
+          const res = await api.post<{ avatarPath: string }>(`/avatars/npc/${chatId}`, {
+            name: char.name,
+            avatar: dataUrl,
+          });
+          const next = [...characters];
+          next[idx] = { ...char, avatarPath: res.avatarPath };
+          onUpdate(next);
+        } catch {
+          // silently fail
+        }
+      };
+      reader.readAsDataURL(file);
+    },
+    [characters, chatId, onUpdate],
+  );
+
   const addCharacter = () => {
     onUpdate([
       ...characters,
@@ -447,12 +500,27 @@ export function CharactersPanel({ characters, onUpdate }: CharactersPanelProps) 
         <span className="text-[0.625rem] font-semibold text-white/50 uppercase tracking-wider flex items-center gap-1">
           <Users size="0.625rem" /> Present Characters
         </span>
-        <button
-          onClick={addCharacter}
-          className="flex items-center gap-0.5 text-[0.625rem] text-purple-400 hover:text-purple-300 transition-colors"
-        >
-          <Plus size="0.625rem" /> Add
-        </button>
+        <div className="flex items-center gap-2">
+          {trackerConfig && (
+            <button
+              onClick={toggleAutoGenerate}
+              className={cn(
+                "flex items-center gap-1 text-[0.5625rem] transition-colors",
+                autoGenEnabled ? "text-purple-400" : "text-white/30 hover:text-white/50",
+              )}
+              title={autoGenEnabled ? "Auto-generate avatars: ON" : "Auto-generate avatars: OFF"}
+            >
+              <Sparkles size="0.5625rem" />
+              <span className="hidden sm:inline">Auto</span>
+            </button>
+          )}
+          <button
+            onClick={addCharacter}
+            className="flex items-center gap-0.5 text-[0.625rem] text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            <Plus size="0.625rem" /> Add
+          </button>
+        </div>
       </div>
       <div className="p-2 space-y-2">
         {characters.length === 0 && (
@@ -461,11 +529,34 @@ export function CharactersPanel({ characters, onUpdate }: CharactersPanelProps) 
         {characters.map((char, idx) => (
           <div key={char.characterId ?? idx} className="rounded-lg bg-white/5 p-2 space-y-1">
             <div className="flex items-center gap-1.5">
-              <InlineEdit
-                value={char.emoji || "👤"}
-                onSave={(value) => updateCharacter(idx, { ...char, emoji: value })}
-                className="w-8 text-center !text-sm"
-              />
+              {/* Avatar circle or emoji fallback */}
+              {char.avatarPath ? (
+                <button
+                  onClick={() => {
+                    setUploadIdx(idx);
+                    fileInputRef.current?.click();
+                  }}
+                  className="shrink-0 rounded-full overflow-hidden ring-1 ring-purple-400/40 hover:ring-purple-400/80 transition-all"
+                  title="Change avatar"
+                >
+                  <img
+                    src={char.avatarPath}
+                    alt={char.name}
+                    className="w-8 h-8 object-cover"
+                  />
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setUploadIdx(idx);
+                    fileInputRef.current?.click();
+                  }}
+                  className="shrink-0 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/30 hover:text-purple-400 hover:bg-white/15 transition-all ring-1 ring-white/10"
+                  title="Upload avatar"
+                >
+                  <ImagePlus size="0.75rem" />
+                </button>
+              )}
               <InlineEdit
                 value={char.name}
                 onSave={(value) => updateCharacter(idx, { ...char, name: value })}
@@ -525,6 +616,18 @@ export function CharactersPanel({ characters, onUpdate }: CharactersPanelProps) 
           </div>
         ))}
       </div>
+      {/* Hidden file input for avatar upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && uploadIdx !== null) handleAvatarUpload(uploadIdx, file);
+          e.target.value = "";
+        }}
+      />
     </>
   );
 }
