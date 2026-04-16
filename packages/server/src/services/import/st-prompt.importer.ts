@@ -106,6 +106,7 @@ export async function importSTPreset(
         strictRoleFormatting: true,
         singleUserMessage: false,
       },
+    },
     options?.timestampOverrides,
   );
 
