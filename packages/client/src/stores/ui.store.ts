@@ -20,6 +20,11 @@ export type HudPosition = "top" | "left" | "right";
 export type EchoChamberSide = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 export type UserStatus = "active" | "idle" | "dnd";
 
+const SIDEBAR_WIDTH_MIN = 240;
+const SIDEBAR_WIDTH_MAX = 480;
+const RIGHT_PANEL_WIDTH_MIN = 280;
+const RIGHT_PANEL_WIDTH_MAX = 520;
+
 /** Legacy browser-local custom theme preserved for one-time migration. */
 export interface CustomTheme {
   id: string;
@@ -48,6 +53,7 @@ interface UIState {
   sidebarOpen: boolean;
   sidebarWidth: number;
   rightPanelOpen: boolean;
+  rightPanelWidth: number;
   rightPanel: Panel;
   settingsTab: string;
   modal: { type: string; props?: Record<string, unknown> } | null;
@@ -166,6 +172,7 @@ interface UIState {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
+  setRightPanelWidth: (width: number) => void;
   openRightPanel: (panel: Panel) => void;
   closeRightPanel: () => void;
   toggleRightPanel: (panel: Panel) => void;
@@ -307,6 +314,7 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: true,
       sidebarWidth: 280,
       rightPanelOpen: false,
+      rightPanelWidth: 320,
       rightPanel: "chat" as Panel,
       settingsTab: "general",
       modal: null,
@@ -368,7 +376,9 @@ export const useUIStore = create<UIState>()(
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setSidebarWidth: (width) => set({ sidebarWidth: width }),
+      setSidebarWidth: (width) => set({ sidebarWidth: Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width)) }),
+      setRightPanelWidth: (width) =>
+        set({ rightPanelWidth: Math.max(RIGHT_PANEL_WIDTH_MIN, Math.min(RIGHT_PANEL_WIDTH_MAX, width)) }),
 
       openRightPanel: (panel) => set({ rightPanelOpen: true, rightPanel: panel }),
       closeRightPanel: () => set({ rightPanelOpen: false }),
@@ -591,7 +601,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "marinara-engine-ui",
-      version: 7,
+      version: 8,
       // Debounce localStorage writes to avoid sync I/O on every state change
       storage: createJSONStorage(() => {
         let timer: ReturnType<typeof setTimeout> | null = null;
@@ -679,11 +689,18 @@ export const useUIStore = create<UIState>()(
             persisted.hasMigratedCustomThemesToServer = false;
           }
         }
+        // v7 → v8: persist right panel width
+        if (version <= 7) {
+          if (persisted.rightPanelWidth === undefined) {
+            persisted.rightPanelWidth = 320;
+          }
+        }
         return persisted;
       },
       partialize: (state) => ({
         sidebarOpen: state.sidebarOpen,
         sidebarWidth: state.sidebarWidth,
+        rightPanelWidth: state.rightPanelWidth,
         theme: state.theme,
         chatBackground: state.chatBackground,
         fontSize: state.fontSize,

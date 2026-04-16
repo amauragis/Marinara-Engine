@@ -35,6 +35,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { PROVIDERS, MODEL_LISTS, IMAGE_GENERATION_SOURCES, type APIProvider } from "@marinara-engine/shared";
 
@@ -923,11 +924,12 @@ export function ConnectionEditor() {
               help="The maximum number of tokens this model can process at once (your messages + its reply). This is auto-set when you pick a model from the list."
             >
               <div className="flex items-center gap-3">
-                <input
-                  type="number"
+                <DraftNumberInput
                   value={localMaxContext}
-                  onChange={(e) => {
-                    setLocalMaxContext(Number(e.target.value) || 128000);
+                  min={0}
+                  selectOnFocus
+                  onCommit={(nextValue) => {
+                    setLocalMaxContext(nextValue);
                     markDirty();
                   }}
                   className="w-40 rounded-xl bg-[var(--secondary)] px-3 py-2.5 text-sm ring-1 ring-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"

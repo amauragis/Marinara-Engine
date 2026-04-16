@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import type { Message, SpriteSide } from "@marinara-engine/shared";
 import { ConversationView } from "./ConversationView";
 import { ChatCommonOverlays } from "./ChatCommonOverlays";
-import type { CharacterMap, PeekPromptData, PersonaInfo } from "./chat-area.types";
+import type { CharacterMap, MessageSelectionToggle, PeekPromptData, PersonaInfo } from "./chat-area.types";
 
 type SceneInfo =
   | {
@@ -46,7 +46,7 @@ type ConversationSurfaceProps = {
   onRegenerate: (messageId: string) => void;
   onEdit: (messageId: string, content: string) => void;
   onPeekPrompt: () => void;
-  onToggleSelectMessage: (messageId: string) => void;
+  onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
   onSwitchChat?: () => void;
   onConcludeScene?: () => void;
   onAbandonScene?: () => void;

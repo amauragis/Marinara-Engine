@@ -12,7 +12,7 @@ import { useUIStore } from "../../stores/ui.store";
 import { playNotificationPing } from "../../lib/notification-sound";
 import { characterKeys } from "../../hooks/use-characters";
 import { api } from "../../lib/api-client";
-import type { CharacterMap, PersonaInfo } from "./chat-area.types";
+import type { CharacterMap, MessageSelectionToggle, PersonaInfo } from "./chat-area.types";
 import type { Message } from "@marinara-engine/shared";
 
 const ConversationAutonomousEffects = lazy(async () => {
@@ -44,7 +44,7 @@ interface ConversationViewProps {
   onOpenGallery: () => void;
   multiSelectMode?: boolean;
   selectedMessageIds?: Set<string>;
-  onToggleSelectMessage?: (messageId: string) => void;
+  onToggleSelectMessage?: (toggle: MessageSelectionToggle) => void;
   connectedChatName?: string;
   onSwitchChat?: () => void;
   sceneInfo?: {
@@ -728,6 +728,7 @@ export function ConversationView({
                 characterMap={characterMap}
                 personaInfo={personaInfo as any}
                 messageIndex={item.index + 1}
+                messageOrderIndex={item.index}
                 multiSelectMode={multiSelectMode}
                 isSelected={selectedMessageIds?.has(msg.id)}
                 onToggleSelect={onToggleSelectMessage}

@@ -9,6 +9,7 @@ import { CustomThemeInjector } from "./components/layout/CustomThemeInjector";
 import { Toaster } from "sonner";
 import { useUIStore } from "./stores/ui.store";
 import { api } from "./lib/api-client";
+import { clearBrowserRuntimeCaches } from "./lib/cache-reset";
 import { useLegacyThemeMigration } from "./hooks/use-themes";
 import { useSettingsSync } from "./hooks/use-settings-sync";
 
@@ -31,15 +32,7 @@ async function recoverFromVersionSkew(serverVersion: string) {
 
   sessionStorage.setItem(VERSION_RECOVERY_KEY, serverVersion);
 
-  if ("serviceWorker" in navigator) {
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map((registration) => registration.unregister()));
-  }
-
-  if ("caches" in window) {
-    const cacheKeys = await caches.keys();
-    await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
-  }
+  await clearBrowserRuntimeCaches();
 
   const nextUrl = new URL(window.location.href);
   nextUrl.searchParams.set("v", serverVersion);

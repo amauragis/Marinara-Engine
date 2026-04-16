@@ -9,7 +9,7 @@ import { useBackgroundAutonomousPolling } from "../../hooks/use-background-auton
 import { useIdleDetection } from "../../hooks/use-idle-detection";
 import { cn } from "../../lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { lazy, Suspense, useState, useEffect, useRef, useCallback } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 
 const ChatArea = lazy(() => import("../chat/ChatArea").then((module) => ({ default: module.ChatArea })));
 const CharacterEditor = lazy(() =>
@@ -74,7 +74,11 @@ export function AppShell() {
 
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
+  const rightPanelWidth = useUIStore((s) => s.rightPanelWidth);
+  const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth);
   const closeRightPanel = useUIStore((s) => s.closeRightPanel);
 
   // Track mobile breakpoint for right-panel animation strategy
@@ -95,7 +99,7 @@ export function AppShell() {
       rafId = requestAnimationFrame(() => {
         const { rightPanelOpen: rp, sidebarOpen: sb, sidebarWidth: sw, closeRightPanel: close } = useUIStore.getState();
         if (!rp) return;
-        const panelWidth = 320; // 20rem
+        const panelWidth = useUIStore.getState().rightPanelWidth;
         const reserved = (sb ? sw : 0) + panelWidth;
         if (window.innerWidth - reserved < 400) close();
       });
@@ -154,8 +158,6 @@ export function AppShell() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [checkOverflow]);
-
-  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   const characterDetailId = useUIStore((s) => s.characterDetailId);
   const lorebookDetailId = useUIStore((s) => s.lorebookDetailId);
   const presetDetailId = useUIStore((s) => s.presetDetailId);
@@ -166,6 +168,56 @@ export function AppShell() {
   const regexDetailId = useUIStore((s) => s.regexDetailId);
   const botBrowserOpen = useUIStore((s) => s.botBrowserOpen);
   const hasCompletedOnboarding = useUIStore((s) => s.hasCompletedOnboarding);
+
+  const startSidebarResize = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (isMobile) return;
+      event.preventDefault();
+      const originalCursor = document.body.style.cursor;
+      const originalUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const onMove = (moveEvent: MouseEvent) => {
+        setSidebarWidth(moveEvent.clientX);
+      };
+      const onUp = () => {
+        document.body.style.cursor = originalCursor;
+        document.body.style.userSelect = originalUserSelect;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [isMobile, setSidebarWidth],
+  );
+
+  const startRightPanelResize = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (isMobile) return;
+      event.preventDefault();
+      const originalCursor = document.body.style.cursor;
+      const originalUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+
+      const onMove = (moveEvent: MouseEvent) => {
+        setRightPanelWidth(window.innerWidth - moveEvent.clientX);
+      };
+      const onUp = () => {
+        document.body.style.cursor = originalCursor;
+        document.body.style.userSelect = originalUserSelect;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [isMobile, setRightPanelWidth],
+  );
 
   const detailView = regexDetailId ? (
     <RegexScriptEditor />
@@ -223,6 +275,15 @@ export function AppShell() {
           <ChatSidebar />
         </div>
       </aside>
+      {!isMobile && sidebarOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize left sidebar"
+          onMouseDown={startSidebarResize}
+          className="relative z-20 hidden w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--primary)]/30 md:block"
+        />
+      )}
 
       {/* Center content */}
       <main
@@ -275,16 +336,26 @@ export function AppShell() {
             "mari-right-panel flex-shrink-0 overflow-hidden bg-[var(--background)]/80 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
             rightPanelOpen && "border-l border-[var(--sidebar-border)]/30",
           )}
-          style={{ width: rightPanelOpen ? "20rem" : 0 }}
+          style={{ width: rightPanelOpen ? rightPanelWidth : 0 }}
         >
           {rightPanelOpen && (
-            <div className="h-full" style={{ width: "20rem" }}>
+            <div className="h-full" style={{ width: rightPanelWidth }}>
               <Suspense fallback={<SidePanelFallback />}>
                 <RightPanel />
               </Suspense>
             </div>
           )}
         </aside>
+      )}
+      {!isMobile && rightPanelOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize right sidebar"
+          onMouseDown={startRightPanelResize}
+          className="absolute inset-y-0 hidden w-1 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--primary)]/30 md:block"
+          style={{ right: rightPanelOpen ? rightPanelWidth : 0 }}
+        />
       )}
 
       {/* First-time onboarding tutorial */}

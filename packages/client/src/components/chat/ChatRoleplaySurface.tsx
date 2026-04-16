@@ -36,7 +36,7 @@ import { ChatInput } from "./ChatInput";
 import { CyoaChoices } from "./CyoaChoices";
 import { EndSceneBar } from "./SceneBanner";
 import { ChatCommonOverlays } from "./ChatCommonOverlays";
-import type { CharacterMap, MessageWithSwipes, PeekPromptData, PersonaInfo } from "./chat-area.types";
+import type { CharacterMap, MessageSelectionToggle, MessageWithSwipes, PeekPromptData, PersonaInfo } from "./chat-area.types";
 
 type ChatData = ComponentProps<typeof ChatCommonOverlays>["chat"];
 
@@ -585,7 +585,7 @@ type RoleplaySurfaceProps = {
   onToggleConversationStart: (messageId: string, current: boolean) => void;
   onPeekPrompt: () => void;
   onBranch: (messageId: string) => void;
-  onToggleSelectMessage: (messageId: string) => void;
+  onToggleSelectMessage: (toggle: MessageSelectionToggle) => void;
   onSummaryContextSizeChange: (size: number) => void;
   onRerunTrackers: () => void;
   onStartEncounter: () => void;
@@ -964,6 +964,7 @@ export function ChatRoleplaySurface({
                           chatMode={chatMode}
                           messageDepth={messages.length - 1 - i}
                           messageIndex={totalMessageCount - messages.length + i + 1}
+                          messageOrderIndex={totalMessageCount - messages.length + i}
                           isGrouped={isGrouped(i)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}
@@ -988,6 +989,7 @@ export function ChatRoleplaySurface({
                           chatMode={chatMode}
                           messageDepth={messages.length - 1 - i}
                           messageIndex={totalMessageCount - messages.length + i + 1}
+                          messageOrderIndex={totalMessageCount - messages.length + i}
                           isGrouped={isGrouped(i)}
                           groupChatMode={groupChatMode}
                           chatCharacterIds={chatCharIds}

@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { Chat, Message } from "@marinara-engine/shared";
+import type { Chat, ChatMode, Message } from "@marinara-engine/shared";
 import { useAgentStore } from "./agent.store";
 import { useGameStateStore } from "./game-state.store";
 
@@ -60,6 +60,8 @@ interface ChatState {
   shouldOpenSettings: boolean;
   /** When true, ChatArea should show the setup wizard for the newly created chat. */
   shouldOpenWizard: boolean;
+  /** Pending new-chat mode for first-run connection setup gating. */
+  pendingNewChatMode: Exclude<ChatMode, "visual_novel"> | null;
   /** Per-chat draft input text so typing isn't lost when navigating away. */
   inputDrafts: Map<string, string>;
   /** Per-chat unread message count (from autonomous messages). */
@@ -92,6 +94,7 @@ interface ChatState {
   setSwipeIndex: (messageId: string, index: number) => void;
   setShouldOpenSettings: (v: boolean) => void;
   setShouldOpenWizard: (v: boolean) => void;
+  setPendingNewChatMode: (mode: Exclude<ChatMode, "visual_novel"> | null) => void;
   setInputDraft: (chatId: string, text: string) => void;
   clearInputDraft: (chatId: string) => void;
   incrementUnread: (chatId: string) => void;
@@ -126,6 +129,7 @@ export const useChatStore = create<ChatState>()(
     swipeIndex: new Map(),
     shouldOpenSettings: false,
     shouldOpenWizard: false,
+    pendingNewChatMode: null,
     inputDrafts: loadDrafts(),
     unreadCounts: new Map(),
     chatNotifications: new Map(),
@@ -270,6 +274,8 @@ export const useChatStore = create<ChatState>()(
 
     setShouldOpenWizard: (v) => set({ shouldOpenWizard: v }),
 
+    setPendingNewChatMode: (mode) => set({ pendingNewChatMode: mode }),
+
     setInputDraft: (chatId: string, text: string) =>
       set((state) => {
         const m = new Map(state.inputDrafts);
@@ -348,6 +354,7 @@ export const useChatStore = create<ChatState>()(
         perChatTyping: new Map(),
         perChatDelayed: new Map(),
         swipeIndex: new Map(),
+        pendingNewChatMode: null,
         inputDrafts: new Map(),
         unreadCounts: new Map(),
         chatNotifications: new Map(),

@@ -43,11 +43,12 @@ import {
   RefreshCw,
   ExternalLink,
 } from "lucide-react";
-import { useClearAllData } from "../../hooks/use-chats";
+import { useClearAllData, useExpungeData, type ExpungeScope } from "../../hooks/use-chats";
 import { useChatStore } from "../../stores/chat.store";
 import { chatKeys } from "../../hooks/use-chats";
 import { HelpTooltip } from "../ui/HelpTooltip";
 import { ConversationSoundSetting, ToggleSetting } from "./settings/SettingControls";
+import { DraftNumberInput } from "../ui/DraftNumberInput";
 
 const TABS = [
   { id: "general", label: "General" },
@@ -66,6 +67,17 @@ const SETTINGS_COMPONENTS: Record<(typeof TABS)[number]["id"], React.FC> = {
   import: ImportSettings,
   advanced: AdvancedSettings,
 };
+
+const EXPUNGE_SCOPE_OPTIONS: Array<{ id: ExpungeScope; label: string; description: string }> = [
+  { id: "chats", label: "Chats & Messages", description: "Chats, folders, messages, scene/OOC data, and chat runtime state." },
+  { id: "characters", label: "Characters", description: "Characters and character groups. Professor Mari is always preserved." },
+  { id: "personas", label: "Personas", description: "Personas and persona groups." },
+  { id: "lorebooks", label: "Lorebooks", description: "Lorebooks and lorebook entries." },
+  { id: "presets", label: "Presets", description: "Prompt presets, groups, sections, and variables." },
+  { id: "connections", label: "Connections", description: "API connections and model endpoints." },
+  { id: "automation", label: "Automation & Themes", description: "Agents, tools, regex scripts, synced themes, and automation state." },
+  { id: "media", label: "Media & Assets", description: "Backgrounds, avatars, sprites, gallery items, fonts, and knowledge-source files." },
+];
 
 // Module-level set survives component remounts (e.g. mobile AnimatePresence unmount/remount)
 const mountedSettingsTabs = new Set<string>();
@@ -213,12 +225,11 @@ function GeneralSettings() {
       {/* Messages per page */}
       <label className="flex items-center gap-2.5 rounded-lg p-1 transition-colors hover:bg-[var(--secondary)]/50">
         <span className="text-xs">Messages per page</span>
-        <input
-          type="number"
+        <DraftNumberInput
+          value={messagesPerPage}
           min={0}
           max={500}
-          value={messagesPerPage}
-          onChange={(e) => setMessagesPerPage(Math.max(0, Math.min(500, parseInt(e.target.value, 10) || 0)))}
+          onCommit={(nextValue) => setMessagesPerPage(Math.max(0, Math.min(500, nextValue)))}
           className="w-16 rounded-md border border-[var(--border)] bg-[var(--secondary)] px-2 py-1 text-xs"
         />
         <HelpTooltip text="How many messages to load at a time. Click 'Load More' in the chat to see older messages. Set to 0 to load all messages at once." />
@@ -1694,7 +1705,9 @@ function AdvancedSettings() {
   const showMessageNumbers = useUIStore((s) => s.showMessageNumbers);
   const setShowMessageNumbers = useUIStore((s) => s.setShowMessageNumbers);
   const clearAllData = useClearAllData();
-  const [confirmStep, setConfirmStep] = useState(0); // 0=idle, 1=first click, 2=confirmed
+  const expungeData = useExpungeData();
+  const [selectedScopes, setSelectedScopes] = useState<ExpungeScope[]>(["chats"]);
+  const [confirmAction, setConfirmAction] = useState<"selected" | "all" | null>(null);
   const [exportingProfile, setExportingProfile] = useState(false);
 
   const handleExportProfile = async () => {
@@ -1789,6 +1802,31 @@ function AdvancedSettings() {
   const currentReleaseLabel = `v${health.data?.version ?? updateCheck.data?.currentVersion ?? APP_VERSION}`;
   const currentCommit = health.data?.commit ?? updateCheck.data?.currentCommit ?? null;
   const currentBuildLabel = currentCommit ? `Build: ${currentCommit.slice(0, 7)}` : "Build: unavailable";
+  const isClearing = clearAllData.isPending || expungeData.isPending;
+  const isAllScopesSelected = selectedScopes.length === EXPUNGE_SCOPE_OPTIONS.length;
+
+  const toggleScope = (scope: ExpungeScope) => {
+    setSelectedScopes((current) =>
+      current.includes(scope) ? current.filter((entry) => entry !== scope) : [...current, scope],
+    );
+  };
+
+  const runExpunge = (mode: "selected" | "all") => {
+    if (mode === "all") {
+      clearAllData.mutate(undefined, {
+        onSuccess: () => toast.success("All selected data was cleared. Runtime caches were reset immediately."),
+        onError: () => toast.error("Failed to clear all data."),
+        onSettled: () => setConfirmAction(null),
+      });
+      return;
+    }
+
+    expungeData.mutate(selectedScopes, {
+      onSuccess: () => toast.success("Selected data was cleared. Runtime caches were reset immediately."),
+      onError: () => toast.error("Failed to clear selected data."),
+      onSettled: () => setConfirmAction(null),
+    });
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -2020,50 +2058,91 @@ function AdvancedSettings() {
           Danger Zone
         </div>
         <p className="text-[0.625rem] text-[var(--muted-foreground)]">
-          This will permanently delete <strong>all</strong> characters, chats, messages, presets, lorebooks,
-          backgrounds, sprites, personas, and connections. This action cannot be undone.
+          Permanently clear selected categories of local data. Professor Mari is always preserved, and Marinara resets
+          live caches immediately after a successful expunge so stale data does not linger on screen.
         </p>
-        {confirmStep === 0 && (
+        <div className="grid gap-2">
+          {EXPUNGE_SCOPE_OPTIONS.map((scope) => {
+            const checked = selectedScopes.includes(scope.id);
+            return (
+              <label
+                key={scope.id}
+                className={cn(
+                  "flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 ring-1 transition-colors",
+                  checked
+                    ? "bg-[var(--destructive)]/10 ring-[var(--destructive)]/25"
+                    : "bg-[var(--background)]/40 ring-[var(--border)] hover:bg-[var(--secondary)]/70",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={isClearing}
+                  onChange={() => toggleScope(scope.id)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-[var(--border)] accent-[var(--destructive)]"
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-medium text-[var(--foreground)]">{scope.label}</span>
+                  <span className="block text-[0.625rem] text-[var(--muted-foreground)]">{scope.description}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setConfirmStep(1)}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-[var(--destructive)] px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95"
+            onClick={() =>
+              setSelectedScopes(
+                isAllScopesSelected ? [] : EXPUNGE_SCOPE_OPTIONS.map((scope) => scope.id),
+              )
+            }
+            disabled={isClearing}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium transition-all hover:bg-[var(--secondary)] active:scale-95 disabled:opacity-50"
+          >
+            {isAllScopesSelected ? "Clear Selection" : "Select All"}
+          </button>
+          <button
+            onClick={() => setConfirmAction("selected")}
+            disabled={selectedScopes.length === 0 || isClearing}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--destructive)]/85 px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size="0.8125rem" />
+            Clear Selected Data
+          </button>
+          <button
+            onClick={() => setConfirmAction("all")}
+            disabled={isClearing}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--destructive)] px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
           >
             <Trash2 size="0.8125rem" />
             Clear All Data
           </button>
-        )}
-        {confirmStep === 1 && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-start gap-2 rounded-lg bg-[var(--destructive)]/15 p-2.5 text-[0.6875rem] text-[var(--destructive)] font-medium">
+        </div>
+        {confirmAction && (
+          <div className="flex flex-col gap-2 rounded-lg bg-[var(--destructive)]/12 p-2.5">
+            <div className="flex items-start gap-2 text-[0.6875rem] font-medium text-[var(--destructive)]">
               <AlertTriangle size="0.875rem" className="mt-0.5 shrink-0" />
-              Are you sure? This will erase everything. There is no undo.
+              {confirmAction === "all"
+                ? "Delete all supported data categories except Professor Mari? There is no undo."
+                : `Delete ${selectedScopes.length} selected data categor${selectedScopes.length === 1 ? "y" : "ies"}? There is no undo.`}
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setConfirmStep(0)}
-                className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium transition-all hover:bg-[var(--secondary)] active:scale-95"
+                onClick={() => setConfirmAction(null)}
+                disabled={isClearing}
+                className="flex-1 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium transition-all hover:bg-[var(--secondary)] active:scale-95 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setConfirmStep(2);
-                  clearAllData.mutate(undefined, {
-                    onSettled: () => setConfirmStep(0),
-                  });
-                }}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--destructive)] px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95"
+                onClick={() => runExpunge(confirmAction)}
+                disabled={isClearing}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--destructive)] px-3 py-2 text-xs font-medium text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-50"
               >
-                <Trash2 size="0.75rem" />
-                Yes, Delete Everything
+                {isClearing ? <Loader2 size="0.75rem" className="animate-spin" /> : <Trash2 size="0.75rem" />}
+                Confirm Delete
               </button>
             </div>
-          </div>
-        )}
-        {confirmStep === 2 && (
-          <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--muted-foreground)]">
-            <Loader2 size="0.875rem" className="animate-spin" />
-            Clearing all data…
           </div>
         )}
       </div>

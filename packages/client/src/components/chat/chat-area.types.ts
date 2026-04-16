@@ -44,3 +44,10 @@ export type PeekPromptData = {
 export type MessageWithSwipes = Message & {
   swipes?: Array<{ id: string; content: string }>;
 };
+
+export type MessageSelectionToggle = {
+  messageId: string;
+  orderIndex: number;
+  checked: boolean;
+  shiftKey: boolean;
+};

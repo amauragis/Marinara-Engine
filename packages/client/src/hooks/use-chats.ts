@@ -4,6 +4,11 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { api } from "../lib/api-client";
 import { useChatStore } from "../stores/chat.store";
+import { useAgentStore } from "../stores/agent.store";
+import { useGameStateStore } from "../stores/game-state.store";
+import { useEncounterStore } from "../stores/encounter.store";
+import { useUIStore } from "../stores/ui.store";
+import { clearBrowserRuntimeCaches } from "../lib/cache-reset";
 import type { Chat, Message, MessageSwipe } from "@marinara-engine/shared";
 
 export const chatKeys = {
@@ -14,6 +19,31 @@ export const chatKeys = {
   messageCount: (chatId: string) => [...chatKeys.all, "messageCount", chatId] as const,
   group: (groupId: string) => [...chatKeys.all, "group", groupId] as const,
 };
+
+export type ExpungeScope =
+  | "chats"
+  | "characters"
+  | "personas"
+  | "lorebooks"
+  | "presets"
+  | "connections"
+  | "automation"
+  | "media";
+
+async function resetClientAfterExpunge(qc: ReturnType<typeof useQueryClient>) {
+  await clearBrowserRuntimeCaches();
+  useChatStore.getState().reset();
+  useAgentStore.getState().reset();
+  useGameStateStore.getState().reset();
+  useEncounterStore.getState().reset();
+  const ui = useUIStore.getState();
+  ui.closeModal();
+  ui.closeAllDetails();
+  ui.closeRightPanel();
+  ui.closeBotBrowser();
+  ui.setChatBackground(null);
+  qc.clear();
+}
 
 export function useChats() {
   return useQuery({
@@ -321,11 +351,24 @@ export function useGenerateSummary() {
 }
 
 /** Clear all user data */
+export function useExpungeData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (scopes: ExpungeScope[]) => api.post<{ success: boolean }>("/admin/expunge", { confirm: true, scopes }),
+    onSuccess: async () => {
+      await resetClientAfterExpunge(qc);
+    },
+  });
+}
+
+/** Clear all user data */
 export function useClearAllData() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<{ success: boolean }>("/admin/clear-all", { confirm: true }),
-    onSuccess: () => qc.invalidateQueries(),
+    onSuccess: async () => {
+      await resetClientAfterExpunge(qc);
+    },
   });
 }
 

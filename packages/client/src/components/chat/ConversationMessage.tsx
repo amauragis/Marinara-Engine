@@ -12,6 +12,7 @@ import { chatKeys } from "../../hooks/use-chats";
 import type { CharacterMap } from "./ChatArea";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
+import type { MessageSelectionToggle } from "./chat-area.types";
 
 /** Build style object for name color (supports gradients). */
 function nameColorStyle(color?: string): React.CSSProperties | undefined {
@@ -221,9 +222,10 @@ interface ConversationMessageProps {
   onEditClick?: () => void;
   /** 1-based ordinal position in the message list. Shown under avatar when actions visible. */
   messageIndex?: number;
+  messageOrderIndex?: number;
   multiSelectMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: (messageId: string) => void;
+  onToggleSelect?: (toggle: MessageSelectionToggle) => void;
 }
 
 export const ConversationMessage = memo(function ConversationMessage({
@@ -242,6 +244,7 @@ export const ConversationMessage = memo(function ConversationMessage({
   personaInfo,
   onEditClick,
   messageIndex,
+  messageOrderIndex,
   multiSelectMode,
   isSelected,
   onToggleSelect,
@@ -438,9 +441,14 @@ export const ConversationMessage = memo(function ConversationMessage({
           isStreaming && "bg-[var(--secondary)]/20",
           multiSelectMode && isSelected && "bg-[var(--destructive)]/10",
         )}
-        onClick={() => {
+        onClick={(e) => {
           if (multiSelectMode) {
-            onToggleSelect?.(message.id);
+            onToggleSelect?.({
+              messageId: message.id,
+              orderIndex: messageOrderIndex ?? 0,
+              checked: !isSelected,
+              shiftKey: e.shiftKey,
+            });
           } else {
             setShowActions((v) => !v);
           }
@@ -655,9 +663,14 @@ export const ConversationMessage = memo(function ConversationMessage({
       )}
       data-message-id={message.id}
       data-message-role={message.role}
-      onClick={() => {
+      onClick={(e) => {
         if (multiSelectMode) {
-          onToggleSelect?.(message.id);
+          onToggleSelect?.({
+            messageId: message.id,
+            orderIndex: messageOrderIndex ?? 0,
+            checked: !isSelected,
+            shiftKey: e.shiftKey,
+          });
         } else {
           setShowActions((v) => !v);
         }

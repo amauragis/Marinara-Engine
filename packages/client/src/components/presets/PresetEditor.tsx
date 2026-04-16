@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { HelpTooltip } from "../ui/HelpTooltip";
+import { DraftNumberInput } from "../ui/DraftNumberInput";
 import { api } from "../../lib/api-client";
 import { useAgentConfigs, type AgentConfigRow } from "../../hooks/use-agents";
 import type { WrapFormat, MarkerType } from "@marinara-engine/shared";
@@ -261,7 +262,7 @@ export function PresetEditor() {
             setLocalName(e.target.value);
             markDirty();
           }}
-          className="flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-[var(--muted-foreground)] max-md:text-base"
+          className="h-10 min-w-0 flex-1 self-stretch bg-transparent text-lg font-semibold outline-none placeholder:text-[var(--muted-foreground)] max-md:text-base"
           placeholder="Preset name…"
         />
         <div className="flex items-center gap-1.5">
@@ -1081,15 +1082,15 @@ function SectionsTab({
                         {section.injectionPosition === "depth" && (
                           <>
                             <label className="text-[var(--muted-foreground)]">Depth:</label>
-                            <input
-                              type="number"
+                            <DraftNumberInput
                               value={section.injectionDepth ?? 0}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) =>
+                              min={0}
+                              selectOnFocus
+                              onCommit={(nextValue) =>
                                 onUpdateSection.mutate({
                                   presetId,
                                   sectionId: section.id,
-                                  injectionDepth: parseInt(e.target.value) || 0,
+                                  injectionDepth: nextValue,
                                 })
                               }
                               className="w-16 rounded-lg bg-[var(--secondary)] px-2 py-1 text-xs ring-1 ring-[var(--border)]"

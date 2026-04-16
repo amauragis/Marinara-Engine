@@ -32,6 +32,7 @@ import { useUIStore } from "../../stores/ui.store";
 import { useTranslate } from "../../hooks/use-translate";
 import { api } from "../../lib/api-client";
 import DOMPurify from "dompurify";
+import type { MessageSelectionToggle } from "./chat-area.types";
 
 /** Isolated edit textarea — uncontrolled to avoid React re-renders on every keystroke. */
 const EditTextarea = memo(function EditTextarea({
@@ -133,9 +134,10 @@ interface ChatMessageProps {
   messageDepth?: number;
   /** 1-based ordinal position in the message list. Shown under avatar when actions visible. */
   messageIndex?: number;
+  messageOrderIndex?: number;
   multiSelectMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: (messageId: string) => void;
+  onToggleSelect?: (toggle: MessageSelectionToggle) => void;
 }
 
 /** Regex to match a plain image URL as the entire content. */
@@ -433,6 +435,7 @@ export const ChatMessage = memo(function ChatMessage({
   chatCharacterIds,
   messageDepth,
   messageIndex,
+  messageOrderIndex,
   multiSelectMode,
   isSelected,
   onToggleSelect,
@@ -522,7 +525,12 @@ export const ChatMessage = memo(function ChatMessage({
     (e: React.MouseEvent) => {
       // In multi-select mode, clicking toggles selection on any device
       if (multiSelectMode) {
-        onToggleSelect?.(message.id);
+        onToggleSelect?.({
+          messageId: message.id,
+          orderIndex: messageOrderIndex ?? 0,
+          checked: !isSelected,
+          shiftKey: e.shiftKey,
+        });
         return;
       }
       // Only toggle on touch devices
@@ -532,7 +540,7 @@ export const ChatMessage = memo(function ChatMessage({
       if (target.closest("button, a, textarea")) return;
       setShowActions((v) => !v);
     },
-    [multiSelectMode, onToggleSelect, message.id],
+    [isSelected, message.id, messageOrderIndex, multiSelectMode, onToggleSelect],
   );
 
   // Parse message extra for conversation start flag
@@ -805,12 +813,34 @@ export const ChatMessage = memo(function ChatMessage({
       return (
         <div
           ref={msgRef}
-          className="mari-message mari-message-narrator rpg-narrator-msg group mb-4 px-2"
+          className={cn(
+            "mari-message mari-message-narrator rpg-narrator-msg group mb-4 px-2",
+            multiSelectMode && isSelected && "rounded-lg bg-[var(--destructive)]/5 ring-2 ring-[var(--destructive)]/50",
+          )}
           onClick={handleMobileTap}
         >
-          <div className="mari-message-bubble relative rounded-xl border border-amber-500/10 bg-black/40 px-5 py-4">
+          <div className="flex gap-3">
+            {multiSelectMode && (
+              <div className="flex flex-shrink-0 items-start pt-2">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={isSelected}
+                  aria-label={isSelected ? "Deselect message" : "Select message"}
+                  className={cn(
+                    "flex h-5 w-5 items-center justify-center rounded border-2 transition-colors",
+                    isSelected
+                      ? "border-[var(--destructive)] bg-[var(--destructive)]"
+                      : "border-[var(--muted-foreground)]/40 bg-[var(--secondary)]",
+                  )}
+                >
+                  {isSelected && <span className="text-xs font-bold text-white">✓</span>}
+                </button>
+              </div>
+            )}
+            <div className="mari-message-bubble relative flex-1 rounded-xl border border-amber-500/10 bg-black/40 px-5 py-4">
             {/* Delete button */}
-            {onDelete && (
+            {!multiSelectMode && onDelete && (
               <button
                 onClick={() => onDelete(message.id)}
                 className={cn(
@@ -829,6 +859,7 @@ export const ChatMessage = memo(function ChatMessage({
             </div>
             <div className="mari-message-content whitespace-pre-wrap break-words italic" style={messageTextStyle}>
               {displayContent}
+            </div>
             </div>
           </div>
         </div>

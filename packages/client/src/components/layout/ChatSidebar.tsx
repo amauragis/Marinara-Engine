@@ -20,6 +20,7 @@ import {
   GripVertical,
 } from "lucide-react";
 import { useChats, useCreateChat, useDeleteChat, useDeleteChatGroup } from "../../hooks/use-chats";
+import { useConnections } from "../../hooks/use-connections";
 import {
   useChatFolders,
   useCreateFolder,
@@ -67,6 +68,7 @@ const MODE_CONFIG: Record<
 
 export function ChatSidebar() {
   const { data: chats, isLoading } = useChats();
+  const { data: connections } = useConnections();
   const createChat = useCreateChat();
   const deleteChat = useDeleteChat();
   const deleteChatGroup = useDeleteChatGroup();
@@ -78,6 +80,7 @@ export function ChatSidebar() {
   const editorDirty = useUIStore((s) => s.editorDirty);
   const closeAllDetails = useUIStore((s) => s.closeAllDetails);
   const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
+  const setPendingNewChatMode = useChatStore((s) => s.setPendingNewChatMode);
 
   // Folder hooks
   const { data: folders } = useChatFolders();
@@ -267,6 +270,14 @@ export function ChatSidebar() {
 
   const handleNewChat = useCallback(
     (mode: ChatMode) => {
+      const connectionRows = ((connections ?? []) as Array<{ id: string }>).filter((connection) => !!connection.id);
+      if (connectionRows.length === 0) {
+        if (mode === "conversation" || mode === "roleplay") {
+          setPendingNewChatMode(mode);
+        }
+        return;
+      }
+
       createChat.mutate(
         { name: `New ${MODE_CONFIG[mode]?.label ?? mode}`, mode, characterIds: [] },
         {
@@ -278,7 +289,7 @@ export function ChatSidebar() {
         },
       );
     },
-    [createChat, setActiveChatId],
+    [connections, createChat, setActiveChatId, setPendingNewChatMode],
   );
 
   const handleNewChatFromTab = useCallback(() => {

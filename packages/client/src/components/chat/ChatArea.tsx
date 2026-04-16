@@ -31,6 +31,7 @@ import {
 import { useChatStore } from "../../stores/chat.store";
 import { useGenerate } from "../../hooks/use-generate";
 import { useCharacters, usePersonas } from "../../hooks/use-characters";
+import { useConnections } from "../../hooks/use-connections";
 import { api } from "../../lib/api-client";
 import { useGameStateStore } from "../../stores/game-state.store";
 import { BookOpen, HelpCircle, MessageSquare, Theater } from "lucide-react";
@@ -45,8 +46,9 @@ import { APP_VERSION } from "@marinara-engine/shared";
 import { BUILT_IN_AGENTS } from "@marinara-engine/shared";
 import { useTranslationStore } from "../../hooks/use-translate";
 import { mirrorSpritePlacements, normalizeSpritePlacements } from "./sprite-placement";
-import type { CharacterMap, MessageWithSwipes, PeekPromptData } from "./chat-area.types";
+import type { CharacterMap, MessageSelectionToggle, MessageWithSwipes, PeekPromptData } from "./chat-area.types";
 import { RecentChats } from "./RecentChats";
+import { NewChatConnectionGate } from "./NewChatConnectionGate";
 
 export type { CharacterMap };
 
@@ -88,6 +90,7 @@ export function ChatArea() {
   const [deleteDialogMessageId, setDeleteDialogMessageId] = useState<string | null>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [selectionAnchorIndex, setSelectionAnchorIndex] = useState<number | null>(null);
 
   const { data: chat } = useChat(activeChatId);
   const { data: allChats } = useChats();
@@ -104,8 +107,26 @@ export function ChatArea() {
   );
   const { data: messageCountData } = useChatMessageCount(activeChatId);
   const totalMessageCount = messageCountData?.count ?? messages?.length ?? 0;
+  const messageOffset = messages ? totalMessageCount - messages.length : 0;
+  const messageIdByOrderIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    if (!messages) return map;
+    messages.forEach((message, index) => {
+      map.set(messageOffset + index, message.id);
+    });
+    return map;
+  }, [messageOffset, messages]);
+  const messageOrderIndexById = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!messages) return map;
+    messages.forEach((message, index) => {
+      map.set(message.id, messageOffset + index);
+    });
+    return map;
+  }, [messageOffset, messages]);
   const { data: allCharacters } = useCharacters();
   const { data: allPersonas } = usePersonas();
+  const { data: connections } = useConnections();
   const deleteMessage = useDeleteMessage(activeChatId);
   const deleteMessages = useDeleteMessages(activeChatId);
   const updateMessage = useUpdateMessage(activeChatId);
@@ -116,11 +137,18 @@ export function ChatArea() {
   const { generate, retryAgents } = useGenerate();
   const setActiveSwipe = useSetActiveSwipe(activeChatId);
   const setActiveChatId = useChatStore((s) => s.setActiveChatId);
+  const pendingNewChatMode = useChatStore((s) => s.pendingNewChatMode);
   const failedAgentTypes = useAgentStore((s) => s.failedAgentTypes);
   const agentProcessing = useAgentStore((s) => s.isProcessing);
 
   const handleQuickStart = useCallback(
     (mode: "conversation" | "roleplay") => {
+      const connectionRows = ((connections ?? []) as Array<{ id: string }>).filter((connection) => !!connection.id);
+      if (connectionRows.length === 0) {
+        useChatStore.getState().setPendingNewChatMode(mode);
+        return;
+      }
+
       const label = mode === "conversation" ? "Conversation" : "Roleplay";
       createChat.mutate(
         { name: `New ${label}`, mode, characterIds: [] },
@@ -133,7 +161,7 @@ export function ChatArea() {
         },
       );
     },
-    [createChat],
+    [connections, createChat],
   );
 
   // Build character lookup map
@@ -258,7 +286,7 @@ export function ChatArea() {
 
   // Sync translation config from chat metadata to the translation store
   useEffect(() => {
-    if (!chat) return;
+    if (!chat?.id) return;
     useTranslationStore.getState().setConfig({
       provider: chatMeta.translationProvider ?? "google",
       targetLanguage: chatMeta.translationTargetLang ?? "en",
@@ -454,14 +482,29 @@ export function ChatArea() {
     setMultiSelectMode(true);
   }, [deleteDialogMessageId, messages]);
 
-  const handleToggleSelectMessage = useCallback((messageId: string) => {
+  const handleToggleSelectMessage = useCallback((toggle: MessageSelectionToggle) => {
+    const { messageId, orderIndex, checked, shiftKey } = toggle;
     setSelectedMessageIds((prev) => {
       const next = new Set(prev);
-      if (next.has(messageId)) next.delete(messageId);
-      else next.add(messageId);
+      if (shiftKey && selectionAnchorIndex != null) {
+        const start = Math.min(selectionAnchorIndex, orderIndex);
+        const end = Math.max(selectionAnchorIndex, orderIndex);
+        for (let current = start; current <= end; current++) {
+          const rangeMessageId = messageIdByOrderIndex.get(current);
+          if (!rangeMessageId) continue;
+          if (checked) next.add(rangeMessageId);
+          else next.delete(rangeMessageId);
+        }
+      } else {
+        if (checked) next.add(messageId);
+        else next.delete(messageId);
+      }
       return next;
     });
-  }, []);
+    if (!shiftKey || selectionAnchorIndex == null) {
+      setSelectionAnchorIndex(orderIndex);
+    }
+  }, [messageIdByOrderIndex, selectionAnchorIndex]);
 
   const handleBulkDelete = useCallback(() => {
     if (selectedMessageIds.size > 0) {
@@ -469,12 +512,20 @@ export function ChatArea() {
     }
     setMultiSelectMode(false);
     setSelectedMessageIds(new Set());
+    setSelectionAnchorIndex(null);
   }, [selectedMessageIds, deleteMessages]);
 
   const handleCancelMultiSelect = useCallback(() => {
     setMultiSelectMode(false);
     setSelectedMessageIds(new Set());
+    setSelectionAnchorIndex(null);
   }, []);
+
+  useEffect(() => {
+    setMultiSelectMode(false);
+    setSelectedMessageIds(new Set());
+    setSelectionAnchorIndex(null);
+  }, [activeChatId]);
 
   const handleUnselectAllMessages = useCallback(() => {
     setSelectedMessageIds(new Set());
@@ -735,11 +786,12 @@ export function ChatArea() {
   // ═══════════════════════════════════════════════
   if (!activeChatId) {
     return (
-      <div
-        data-component="ChatArea.EmptyState"
-        className="flex flex-1 flex-col items-center overflow-y-auto p-4 sm:p-8"
-      >
-        <div className="flex w-full max-w-md flex-col items-center gap-6 my-auto py-4">
+      <>
+        <div
+          data-component="ChatArea.EmptyState"
+          className="flex flex-1 flex-col items-center overflow-y-auto p-4 sm:p-8"
+        >
+          <div className="flex w-full max-w-md flex-col items-center gap-6 my-auto py-4">
           {/* Central hero */}
           <div className="relative">
             <div className="animate-pulse-ring bunny-glow flex h-20 w-20 items-center justify-center rounded-2xl shadow-xl shadow-orange-500/20 overflow-hidden">
@@ -865,8 +917,15 @@ export function ChatArea() {
 
             <p className="mt-2 text-[0.625rem] tracking-wide text-[var(--muted-foreground)]/30">v{APP_VERSION}</p>
           </div>
+          </div>
         </div>
-      </div>
+        {pendingNewChatMode && (
+          <NewChatConnectionGate
+            mode={pendingNewChatMode}
+            onClose={() => useChatStore.getState().setPendingNewChatMode(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -913,24 +972,118 @@ export function ChatArea() {
   // ═══════════════════════════════════════════════
   if (chatMode === "conversation") {
     return (
+      <>
+        <Suspense fallback={surfaceFallback}>
+          <ChatConversationSurface
+            activeChatId={activeChatId}
+            chat={chat}
+            messages={messages}
+            isLoading={isLoading}
+            hasNextPage={!!hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            fetchNextPage={fetchNextPage}
+            pageCount={pageCount}
+            totalMessageCount={totalMessageCount}
+            characterMap={characterMap}
+            characterNames={characterNames}
+            personaInfo={personaInfo}
+            chatMeta={chatMeta}
+            chatCharIds={chatCharIds}
+            connectedChatName={connectedChatName}
+            sceneInfo={conversationSceneInfo}
+            settingsOpen={settingsOpen}
+            filesOpen={filesOpen}
+            galleryOpen={galleryOpen}
+            wizardOpen={wizardOpen}
+            peekPromptData={peekPromptData}
+            deleteDialogMessageId={deleteDialogMessageId}
+            multiSelectMode={multiSelectMode}
+            selectedMessageIds={selectedMessageIds}
+            spriteArrangeMode={spriteArrangeMode}
+            onDelete={handleDelete}
+            onRegenerate={handleRegenerate}
+            onEdit={handleEdit}
+            onPeekPrompt={handlePeekPrompt}
+            onToggleSelectMessage={handleToggleSelectMessage}
+            onSwitchChat={chat?.connectedChatId ? () => setActiveChatId(chat.connectedChatId!) : undefined}
+            onConcludeScene={chatMeta.sceneStatus === "active" ? () => concludeScene(activeChatId) : undefined}
+            onAbandonScene={chatMeta.sceneStatus === "active" ? () => abandonScene(activeChatId) : undefined}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenFiles={() => setFilesOpen(true)}
+            onOpenGallery={() => setGalleryOpen(true)}
+            onCloseSettings={() => setSettingsOpen(false)}
+            onCloseFiles={() => setFilesOpen(false)}
+            onCloseGallery={() => setGalleryOpen(false)}
+            onWizardFinish={() => {
+              setWizardOpen(false);
+              setSettingsOpen(true);
+            }}
+            onClosePeekPrompt={() => setPeekPromptData(null)}
+            onResetSpritePlacements={handleResetSpritePlacements}
+            onSpriteSideChange={handleSetSpritePosition}
+            onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
+            onDeleteConfirm={handleDeleteConfirm}
+            onDeleteMore={handleDeleteMore}
+            onCloseDeleteDialog={() => setDeleteDialogMessageId(null)}
+            onBulkDelete={handleBulkDelete}
+            onCancelMultiSelect={handleCancelMultiSelect}
+            lastAssistantMessageId={lastAssistantMessageId}
+          />
+        </Suspense>
+        {pendingNewChatMode && (
+          <NewChatConnectionGate
+            mode={pendingNewChatMode}
+            onClose={() => useChatStore.getState().setPendingNewChatMode(null)}
+          />
+        )}
+      </>
+    );
+  }
+
+  // ═══════════════════════════════════════════════
+  // Roleplay / Visual Novel mode — existing layout
+  // ═══════════════════════════════════════════════
+  const shouldAnimateMessages = !hasAnimatedRef.current;
+  if (messages?.length) hasAnimatedRef.current = true;
+
+  return (
+    <>
       <Suspense fallback={surfaceFallback}>
-        <ChatConversationSurface
+        <ChatRoleplaySurface
           activeChatId={activeChatId}
           chat={chat}
-          messages={messages}
-          isLoading={isLoading}
-          hasNextPage={!!hasNextPage}
-          isFetchingNextPage={isFetchingNextPage}
-          fetchNextPage={fetchNextPage}
-          pageCount={pageCount}
-          totalMessageCount={totalMessageCount}
+          allChats={chatList}
+          chatMeta={chatMeta}
+          chatMode={chatMode}
+          isRoleplay={isRoleplay}
+          centerCompact={centerCompact}
+          chatBackground={chatBackground}
+          weatherEffects={weatherEffects}
+          expressionAgentEnabled={expressionAgentEnabled}
+          combatAgentEnabled={combatAgentEnabled}
+          encounterActive={encounterActive}
+          spritePosition={spritePosition}
+          spriteCharacterIds={spriteCharacterIds}
+          spriteExpressions={spriteExpressions}
+          spritePlacements={spritePlacements}
+          hasCustomSpritePlacements={hasCustomSpritePlacements}
+          spriteArrangeMode={spriteArrangeMode}
+          enabledAgentTypes={enabledAgentTypes}
+          chatCharIds={chatCharIds}
           characterMap={characterMap}
           characterNames={characterNames}
           personaInfo={personaInfo}
-          chatMeta={chatMeta}
-          chatCharIds={chatCharIds}
-          connectedChatName={connectedChatName}
-          sceneInfo={conversationSceneInfo}
+          messages={messages}
+          msgPayload={msgPayload}
+          isLoading={isLoading}
+          hasNextPage={!!hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          isStreaming={isStreaming}
+          regenerateMessageId={regenerateMessageId}
+          shouldAnimateMessages={shouldAnimateMessages}
+          summaryContextSize={summaryContextSize}
+          totalMessageCount={totalMessageCount}
+          lastAssistantMessageId={lastAssistantMessageId}
           settingsOpen={settingsOpen}
           filesOpen={filesOpen}
           galleryOpen={galleryOpen}
@@ -939,15 +1092,23 @@ export function ChatArea() {
           deleteDialogMessageId={deleteDialogMessageId}
           multiSelectMode={multiSelectMode}
           selectedMessageIds={selectedMessageIds}
-          spriteArrangeMode={spriteArrangeMode}
+          groupChatMode={groupChatMode}
+          scrollRef={scrollRef}
+          messagesEndRef={messagesEndRef}
+          onLoadMore={handleLoadMore}
           onDelete={handleDelete}
           onRegenerate={handleRegenerate}
           onEdit={handleEdit}
+          onSetActiveSwipe={handleSetActiveSwipe}
+          onToggleConversationStart={handleToggleConversationStart}
           onPeekPrompt={handlePeekPrompt}
+          onBranch={handleBranch}
           onToggleSelectMessage={handleToggleSelectMessage}
-          onSwitchChat={chat?.connectedChatId ? () => setActiveChatId(chat.connectedChatId!) : undefined}
-          onConcludeScene={chatMeta.sceneStatus === "active" ? () => concludeScene(activeChatId) : undefined}
-          onAbandonScene={chatMeta.sceneStatus === "active" ? () => abandonScene(activeChatId) : undefined}
+          onSummaryContextSizeChange={handleSummaryContextSizeChange}
+          onRerunTrackers={handleRerunTrackers}
+          onStartEncounter={() => startEncounter()}
+          onConcludeScene={() => concludeScene(activeChatId)}
+          onAbandonScene={() => abandonScene(activeChatId)}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenFiles={() => setFilesOpen(true)}
           onOpenGallery={() => setGalleryOpen(true)}
@@ -962,6 +1123,9 @@ export function ChatArea() {
           onResetSpritePlacements={handleResetSpritePlacements}
           onSpriteSideChange={handleSetSpritePosition}
           onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
+          onToggleSpritePosition={handleToggleSpritePosition}
+          onExpressionChange={handleExpressionChange}
+          onSpritePlacementChange={handleSpritePlacementChange}
           onDeleteConfirm={handleDeleteConfirm}
           onDeleteMore={handleDeleteMore}
           onCloseDeleteDialog={() => setDeleteDialogMessageId(null)}
@@ -970,108 +1134,16 @@ export function ChatArea() {
           onUnselectAllMessages={handleUnselectAllMessages}
           onSelectAllAboveSelection={handleSelectAllAboveSelection}
           onSelectAllBelowSelection={handleSelectAllBelowSelection}
-          lastAssistantMessageId={lastAssistantMessageId}
+          isGrouped={isGrouped}
         />
       </Suspense>
-    );
-  }
-
-  // ═══════════════════════════════════════════════
-  // Roleplay / Visual Novel mode — existing layout
-  // ═══════════════════════════════════════════════
-  const shouldAnimateMessages = !hasAnimatedRef.current;
-  if (messages?.length) hasAnimatedRef.current = true;
-
-  return (
-    <Suspense fallback={surfaceFallback}>
-      <ChatRoleplaySurface
-        activeChatId={activeChatId}
-        chat={chat}
-        allChats={chatList}
-        chatMeta={chatMeta}
-        chatMode={chatMode}
-        isRoleplay={isRoleplay}
-        centerCompact={centerCompact}
-        chatBackground={chatBackground}
-        weatherEffects={weatherEffects}
-        expressionAgentEnabled={expressionAgentEnabled}
-        combatAgentEnabled={combatAgentEnabled}
-        encounterActive={encounterActive}
-        spritePosition={spritePosition}
-        spriteCharacterIds={spriteCharacterIds}
-        spriteExpressions={spriteExpressions}
-        spritePlacements={spritePlacements}
-        hasCustomSpritePlacements={hasCustomSpritePlacements}
-        spriteArrangeMode={spriteArrangeMode}
-        enabledAgentTypes={enabledAgentTypes}
-        chatCharIds={chatCharIds}
-        characterMap={characterMap}
-        characterNames={characterNames}
-        personaInfo={personaInfo}
-        messages={messages}
-        msgPayload={msgPayload}
-        isLoading={isLoading}
-        hasNextPage={!!hasNextPage}
-        isFetchingNextPage={isFetchingNextPage}
-        isStreaming={isStreaming}
-        regenerateMessageId={regenerateMessageId}
-        shouldAnimateMessages={shouldAnimateMessages}
-        summaryContextSize={summaryContextSize}
-        totalMessageCount={totalMessageCount}
-        lastAssistantMessageId={lastAssistantMessageId}
-        settingsOpen={settingsOpen}
-        filesOpen={filesOpen}
-        galleryOpen={galleryOpen}
-        wizardOpen={wizardOpen}
-        peekPromptData={peekPromptData}
-        deleteDialogMessageId={deleteDialogMessageId}
-        multiSelectMode={multiSelectMode}
-        selectedMessageIds={selectedMessageIds}
-        groupChatMode={groupChatMode}
-        scrollRef={scrollRef}
-        messagesEndRef={messagesEndRef}
-        onLoadMore={handleLoadMore}
-        onDelete={handleDelete}
-        onRegenerate={handleRegenerate}
-        onEdit={handleEdit}
-        onSetActiveSwipe={handleSetActiveSwipe}
-        onToggleConversationStart={handleToggleConversationStart}
-        onPeekPrompt={handlePeekPrompt}
-        onBranch={handleBranch}
-        onToggleSelectMessage={handleToggleSelectMessage}
-        onSummaryContextSizeChange={handleSummaryContextSizeChange}
-        onRerunTrackers={handleRerunTrackers}
-        onStartEncounter={() => startEncounter()}
-        onConcludeScene={() => concludeScene(activeChatId)}
-        onAbandonScene={() => abandonScene(activeChatId)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenFiles={() => setFilesOpen(true)}
-        onOpenGallery={() => setGalleryOpen(true)}
-        onCloseSettings={() => setSettingsOpen(false)}
-        onCloseFiles={() => setFilesOpen(false)}
-        onCloseGallery={() => setGalleryOpen(false)}
-        onWizardFinish={() => {
-          setWizardOpen(false);
-          setSettingsOpen(true);
-        }}
-        onClosePeekPrompt={() => setPeekPromptData(null)}
-        onResetSpritePlacements={handleResetSpritePlacements}
-        onSpriteSideChange={handleSetSpritePosition}
-        onToggleSpriteArrange={() => setSpriteArrangeMode((prev) => !prev)}
-        onToggleSpritePosition={handleToggleSpritePosition}
-        onExpressionChange={handleExpressionChange}
-        onSpritePlacementChange={handleSpritePlacementChange}
-        onDeleteConfirm={handleDeleteConfirm}
-        onDeleteMore={handleDeleteMore}
-        onCloseDeleteDialog={() => setDeleteDialogMessageId(null)}
-        onBulkDelete={handleBulkDelete}
-        onCancelMultiSelect={handleCancelMultiSelect}
-        onUnselectAllMessages={handleUnselectAllMessages}
-        onSelectAllAboveSelection={handleSelectAllAboveSelection}
-        onSelectAllBelowSelection={handleSelectAllBelowSelection}
-        isGrouped={isGrouped}
-      />
-    </Suspense>
+      {pendingNewChatMode && (
+        <NewChatConnectionGate
+          mode={pendingNewChatMode}
+          onClose={() => useChatStore.getState().setPendingNewChatMode(null)}
+        />
+      )}
+    </>
   );
 }
 
