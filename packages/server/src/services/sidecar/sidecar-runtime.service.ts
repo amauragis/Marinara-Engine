@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import { execFile, execFileSync } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import {
   chmodSync,
@@ -143,54 +143,15 @@ function parseBooleanEnv(value: string | undefined): boolean {
   return /^(1|true|yes|on)$/i.test(value.trim());
 }
 
-function commandSucceedsSync(command: string, args: string[] = []): boolean {
-  try {
-    execFileSync(command, args, {
-      stdio: "ignore",
-      timeout: 5_000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function findSystemLlamaPathSync(): string | null {
-  const candidates: Array<[string, string]> =
-    process.platform === "win32"
-      ? [
-          ["where", "llama-server.exe"],
-          ["where", "llama-server"],
-        ]
-      : [
-          ["which", "llama-server"],
-        ];
-
-  for (const [command, target] of candidates) {
-    try {
-      const stdout = execFileSync(command, [target], {
-        encoding: "utf-8",
-        timeout: 5_000,
-      }).trim();
-      const first = stdout.split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
-      if (first) {
-        return first;
-      }
-    } catch {
-      // Try the next command.
-    }
-  }
-
-  return null;
-}
-
 class SidecarRuntimeService {
   private installPromise: Promise<SidecarRuntimeInstall> | null = null;
   private installAbort: AbortController | null = null;
   private diagnosticsCache: { value: SidecarRuntimeDiagnostics; expiresAt: number } | null = null;
+  private diagnosticsRefreshPromise: Promise<void> | null = null;
 
   constructor() {
     mkdirSync(RUNTIME_DIR, { recursive: true });
+    this.refreshDiagnosticsInBackground();
   }
 
   getLogPath(): string {
@@ -204,7 +165,7 @@ class SidecarRuntimeService {
 
   getStatus(): SidecarRuntimeInfo {
     const diagnostics = this.getDiagnostics();
-    const systemInstall = this.getSystemInstallSync();
+    const systemInstall = this.getSystemInstallSync(diagnostics);
     const current = this.getCurrentInstall();
     const activeInstall = systemInstall ?? current;
     return {
@@ -222,30 +183,20 @@ class SidecarRuntimeService {
       return this.diagnosticsCache.value;
     }
 
-    const fallback: SidecarRuntimeDiagnostics = {
-      gpuVendors: [],
-      preferCuda: commandSucceedsSync("nvidia-smi"),
-      preferHip: false,
-      preferRocm: commandSucceedsSync("rocm-smi") || existsSync("/opt/rocm"),
-      preferSycl: false,
-      preferVulkan:
-        process.platform === "linux"
-          ? ["/usr/lib/libvulkan.so", "/usr/lib64/libvulkan.so", "/usr/lib/x86_64-linux-gnu/libvulkan.so.1"].some((path) => existsSync(path))
-          : commandSucceedsSync("vulkaninfo", ["--summary"]),
-      systemLlamaPath: findSystemLlamaPathSync(),
-      launchCommand: null,
-      launchBackend: null,
-    };
+    const fallback = this.buildFallbackDiagnostics();
+    if (!this.diagnosticsCache) {
+      this.diagnosticsCache = {
+        value: fallback,
+        expiresAt: Date.now() + 5_000,
+      };
+    }
 
-    this.diagnosticsCache = {
-      value: fallback,
-      expiresAt: Date.now() + 15_000,
-    };
+    this.refreshDiagnosticsInBackground();
     return fallback;
   }
 
   setLaunchDiagnostics(command: string | null, backend: SidecarBackend | null): void {
-    const current = this.getDiagnostics();
+    const current = this.diagnosticsCache?.value ?? this.buildFallbackDiagnostics();
     this.diagnosticsCache = {
       value: {
         ...current,
@@ -254,6 +205,38 @@ class SidecarRuntimeService {
       },
       expiresAt: Date.now() + 60_000,
     };
+  }
+
+  private buildFallbackDiagnostics(): SidecarRuntimeDiagnostics {
+    const current = this.diagnosticsCache?.value;
+    return {
+      gpuVendors: current?.gpuVendors ?? [],
+      preferCuda: current?.preferCuda ?? false,
+      preferHip: current?.preferHip ?? false,
+      preferRocm: current?.preferRocm ?? existsSync("/opt/rocm"),
+      preferSycl: current?.preferSycl ?? false,
+      preferVulkan:
+        current?.preferVulkan ??
+        (process.platform === "linux"
+          ? ["/usr/lib/libvulkan.so", "/usr/lib64/libvulkan.so", "/usr/lib/x86_64-linux-gnu/libvulkan.so.1"].some((path) => existsSync(path))
+          : false),
+      systemLlamaPath: current?.systemLlamaPath ?? null,
+      launchCommand: current?.launchCommand ?? null,
+      launchBackend: current?.launchBackend ?? null,
+    };
+  }
+
+  private refreshDiagnosticsInBackground(): void {
+    if (this.diagnosticsRefreshPromise) {
+      return;
+    }
+
+    this.diagnosticsRefreshPromise = this.detectCapabilities()
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        this.diagnosticsRefreshPromise = null;
+      });
   }
 
   getCurrentInstall(): SidecarRuntimeInstall | null {
@@ -589,7 +572,7 @@ class SidecarRuntimeService {
     }
 
     if (platform === "win32") {
-      return await commandSucceeds("vulkaninfo", ["--summary"]);
+      return false;
     }
 
     if (platform === "linux") {
@@ -694,26 +677,13 @@ class SidecarRuntimeService {
       parseBooleanEnv(process.env.MARINARA_SIDECAR_USE_SYSTEM_LLAMA_SERVER);
   }
 
-  private readSystemBuild(systemPath: string): string {
-    try {
-      const output = execFileSync(systemPath, ["--version"], {
-        encoding: "utf-8",
-        timeout: 5_000,
-      }).trim();
-      const firstLine = output.split(/\r?\n/u).find((line) => line.trim())?.trim();
-      return firstLine ? `system: ${firstLine}` : `system: ${basename(systemPath)}`;
-    } catch {
-      return `system: ${basename(systemPath)}`;
-    }
-  }
-
   private createSystemInstall(systemPath: string, capabilities: RuntimeCapabilities | null): SidecarRuntimeInstall {
     const gpuCapable = capabilities
       ? capabilities.preferCuda || capabilities.preferHip || capabilities.preferRocm || capabilities.preferSycl || capabilities.preferVulkan
       : false;
 
     return {
-      build: this.readSystemBuild(systemPath),
+      build: `system: ${basename(systemPath)}`,
       variant: "system-llama-server",
       platform: process.platform,
       arch: process.arch,
@@ -729,29 +699,29 @@ class SidecarRuntimeService {
     };
   }
 
-  private getSystemInstallSync(): SidecarRuntimeInstall | null {
+  private getSystemInstallSync(diagnostics: SidecarRuntimeDiagnostics): SidecarRuntimeInstall | null {
     if (!this.shouldUseSystemRuntime()) {
       return null;
     }
 
-    const systemPath = findSystemLlamaPathSync();
+    const systemPath = diagnostics.systemLlamaPath;
     if (!systemPath) {
+      this.refreshDiagnosticsInBackground();
       return null;
     }
 
-    const cached = this.diagnosticsCache?.value;
     const capabilities: RuntimeCapabilities | null =
-      cached
+      this.diagnosticsCache?.value
         ? {
             platform: process.platform,
             arch: process.arch,
-            gpuVendors: cached.gpuVendors.filter((vendor): vendor is GpuVendor => vendor === "nvidia" || vendor === "amd" || vendor === "intel"),
-            preferCuda: cached.preferCuda,
-            preferHip: cached.preferHip,
-            preferRocm: cached.preferRocm,
-            preferSycl: cached.preferSycl,
-            preferVulkan: cached.preferVulkan,
-            systemLlamaPath: cached.systemLlamaPath,
+            gpuVendors: diagnostics.gpuVendors.filter((vendor): vendor is GpuVendor => vendor === "nvidia" || vendor === "amd" || vendor === "intel"),
+            preferCuda: diagnostics.preferCuda,
+            preferHip: diagnostics.preferHip,
+            preferRocm: diagnostics.preferRocm,
+            preferSycl: diagnostics.preferSycl,
+            preferVulkan: diagnostics.preferVulkan,
+            systemLlamaPath: diagnostics.systemLlamaPath,
           }
         : null;
     return this.createSystemInstall(systemPath, capabilities);

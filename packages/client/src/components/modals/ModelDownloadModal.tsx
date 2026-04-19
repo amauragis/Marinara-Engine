@@ -7,7 +7,7 @@
 // ──────────────────────────────────────────────
 
 import { useEffect, useState } from "react";
-import { BrainCircuit, Check, Download, HardDrive, Loader2, Search, Server, X, Zap } from "lucide-react";
+import { BrainCircuit, Check, Download, HardDrive, Loader2, MessageSquare, Search, Server, X, Zap } from "lucide-react";
 import type { SidecarBackend, SidecarQuantization } from "@marinara-engine/shared";
 import { Modal } from "../ui/Modal.js";
 import { useSidecarStore } from "../../stores/sidecar.store.js";
@@ -40,6 +40,15 @@ function formatRuntimeVariantLabel(variant: string | null): string | null {
   return variant.replace(/-/g, " ");
 }
 
+function ResponseBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-[0.6875rem] font-medium uppercase tracking-wider text-[var(--muted-foreground)]/60">{label}</div>
+      <div className="rounded-lg bg-[var(--secondary)] p-3 text-sm leading-relaxed text-[var(--foreground)]">{value}</div>
+    </div>
+  );
+}
+
 export function ModelDownloadModal({ open, onClose }: Props) {
   const {
     status,
@@ -66,6 +75,9 @@ export function ModelDownloadModal({ open, onClose }: Props) {
     cancelDownload,
     unloadModel,
     restartRuntime,
+    sendTestMessage,
+    testMessagePending,
+    testMessageResult,
     reinstallRuntime,
     updateConfig,
     markPrompted,
@@ -252,7 +264,79 @@ export function ModelDownloadModal({ open, onClose }: Props) {
             {isSystemRuntime && runtime.systemPath && <span>Using system llama-server: {runtime.systemPath}</span>}
             {status === "server_error" && logPath && <span>Log: {logPath}</span>}
           </div>
+          {!isSetupBusy && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => void sendTestMessage()}
+                disabled={!hasModel || testMessagePending}
+                className="flex items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {testMessagePending ? <Loader2 size="0.875rem" className="animate-spin" /> : <MessageSquare size="0.875rem" />}
+                Send Test Message
+              </button>
+              {!hasModel && (
+                <span className="self-center text-xs text-[var(--muted-foreground)]/70">
+                  Download or choose a model first to test the local runtime.
+                </span>
+              )}
+            </div>
+          )}
         </div>
+
+        {testMessageResult && (
+          <div
+            className={`rounded-xl border p-4 ${
+              testMessageResult.success
+                ? "border-emerald-500/25 bg-emerald-500/5"
+                : "border-red-500/25 bg-red-500/5"
+            }`}
+          >
+            <div className={`text-sm font-medium ${testMessageResult.success ? "text-emerald-300" : "text-red-300"}`}>
+              Local Test Message {testMessageResult.success ? "Succeeded" : "Failed"}
+            </div>
+            <div className="mt-1 text-xs text-[var(--muted-foreground)]/75">{testMessageResult.latencyMs}ms</div>
+            {testMessageResult.success ? (
+              <div className="mt-3 flex flex-col gap-3">
+                {testMessageResult.nonce && (
+                  <div className="text-xs text-[var(--muted-foreground)]/75">
+                    Verification token: <span className="font-mono text-[var(--foreground)]">{testMessageResult.nonce}</span>
+                    {testMessageResult.nonceVerified ? " • echoed by model" : " • not echoed"}
+                  </div>
+                )}
+                {(testMessageResult.usage || testMessageResult.timings) && (
+                  <div className="text-xs text-[var(--muted-foreground)]/75">
+                    {testMessageResult.usage && (
+                      <span>
+                        Usage: prompt {testMessageResult.usage.promptTokens ?? "?"}, completion{" "}
+                        {testMessageResult.usage.completionTokens ?? "?"}, total {testMessageResult.usage.totalTokens ?? "?"}
+                      </span>
+                    )}
+                    {testMessageResult.usage && testMessageResult.timings && <span> • </span>}
+                    {testMessageResult.timings && (
+                      <span>
+                        Timings: prompt {testMessageResult.timings.promptMs ?? "?"}ms / gen {testMessageResult.timings.predictedMs ?? "?"}ms
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!!testMessageResult.messageContent && <ResponseBlock label="Message Content" value={testMessageResult.messageContent} />}
+                {!!testMessageResult.reasoningContent && (
+                  <ResponseBlock label="Reasoning Content" value={testMessageResult.reasoningContent} />
+                )}
+                {!testMessageResult.messageContent && !testMessageResult.reasoningContent && (
+                  <ResponseBlock label="Response" value={testMessageResult.response} />
+                )}
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-col gap-1 text-xs text-red-200/90">
+                <span>{testMessageResult.error || "No response received from the local runtime."}</span>
+                {testMessageResult.failedRuntimeVariant && (
+                  <span>Runtime: {formatRuntimeVariantLabel(testMessageResult.failedRuntimeVariant)}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {status === "server_error" && (
           <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">

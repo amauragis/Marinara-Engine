@@ -12,6 +12,7 @@ import {
   analyzeScene,
   isInferenceAvailable,
   isInferenceBusy,
+  runTestMessage,
   runTrackerPrompt,
   unloadModel,
 } from "../services/sidecar/sidecar-inference.service.js";
@@ -74,6 +75,32 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   app.post("/restart", async () => {
     await sidecarProcessService.restart();
     return { ok: true };
+  });
+
+  app.post("/test-message", async () => {
+    const startedAt = Date.now();
+    try {
+      const result = await runTestMessage();
+      return {
+        success: true,
+        response: result.output,
+        messageContent: result.content,
+        reasoningContent: result.reasoning,
+        nonce: result.nonce,
+        nonceVerified: result.nonceVerified,
+        usage: result.usage,
+        timings: result.timings,
+        latencyMs: Date.now() - startedAt,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        response: "",
+        latencyMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : "Local sidecar test failed",
+        failedRuntimeVariant: sidecarProcessService.getFailedRuntimeVariant(),
+      };
+    }
   });
 
   app.post("/reinstall", async () => {

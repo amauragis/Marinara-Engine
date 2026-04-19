@@ -18,6 +18,29 @@ import type {
 import { SIDECAR_DEFAULT_CONFIG } from "@marinara-engine/shared";
 import { api } from "../lib/api-client.js";
 
+interface SidecarTestMessageResult {
+  success: boolean;
+  response: string;
+  messageContent?: string;
+  reasoningContent?: string;
+  nonce?: string;
+  nonceVerified?: boolean;
+  usage?: {
+    promptTokens: number | null;
+    completionTokens: number | null;
+    totalTokens: number | null;
+  };
+  timings?: {
+    promptTokens: number | null;
+    promptMs: number | null;
+    predictedTokens: number | null;
+    predictedMs: number | null;
+  };
+  latencyMs: number;
+  error?: string;
+  failedRuntimeVariant?: string | null;
+}
+
 interface SidecarState {
   status: SidecarStatus;
   config: SidecarConfig;
@@ -39,6 +62,8 @@ interface SidecarState {
   customModelsError: string | null;
   showDownloadModal: boolean;
   hasBeenPrompted: boolean;
+  testMessagePending: boolean;
+  testMessageResult: SidecarTestMessageResult | null;
 
   fetchStatus: () => Promise<void>;
   startDownload: (quantization: SidecarQuantization) => Promise<void>;
@@ -49,6 +74,7 @@ interface SidecarState {
   deleteModel: () => Promise<void>;
   unloadModel: () => Promise<void>;
   restartRuntime: () => Promise<void>;
+  sendTestMessage: () => Promise<void>;
   reinstallRuntime: () => Promise<void>;
   updateConfig: (
     partial: Partial<Pick<SidecarConfig, "useForTrackers" | "useForGameScene" | "contextSize" | "gpuLayers">>,
@@ -184,6 +210,8 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   customModelsError: null,
   showDownloadModal: false,
   hasBeenPrompted: localStorage.getItem(PROMPTED_KEY) === "true",
+  testMessagePending: false,
+  testMessageResult: null,
 
   fetchStatus: async () => {
     try {
@@ -222,6 +250,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       status: "downloading_model",
       startupError: null,
       failedRuntimeVariant: null,
+      testMessageResult: null,
       downloadProgress: {
         phase: "model",
         status: "downloading",
@@ -252,6 +281,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       status: "downloading_model",
       startupError: null,
       failedRuntimeVariant: null,
+      testMessageResult: null,
       downloadProgress: {
         phase: "model",
         status: "downloading",
@@ -325,6 +355,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         startupError: null,
         failedRuntimeVariant: null,
         runtimeDiagnostics: null,
+        testMessageResult: null,
       });
       await get().fetchStatus();
     } catch {
@@ -346,6 +377,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       status: "starting_server",
       startupError: null,
       failedRuntimeVariant: null,
+      testMessageResult: null,
       downloadProgress: null,
     });
 
@@ -358,11 +390,42 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     await get().fetchStatus();
   },
 
+  sendTestMessage: async () => {
+    set({
+      testMessagePending: true,
+      testMessageResult: null,
+      startupError: null,
+      failedRuntimeVariant: null,
+    });
+
+    try {
+      const result = await api.post<SidecarTestMessageResult>("/sidecar/test-message");
+      set({
+        testMessagePending: false,
+        testMessageResult: result,
+      });
+    } catch (error) {
+      set({
+        testMessagePending: false,
+        testMessageResult: {
+          success: false,
+          response: "",
+          latencyMs: 0,
+          error: error instanceof Error ? error.message : "Failed to run the local sidecar test message",
+          failedRuntimeVariant: null,
+        },
+      });
+    }
+
+    await get().fetchStatus();
+  },
+
   reinstallRuntime: async () => {
     set({
       status: "downloading_runtime",
       startupError: null,
       failedRuntimeVariant: null,
+      testMessageResult: null,
       downloadProgress: {
         phase: "runtime",
         status: "downloading",
