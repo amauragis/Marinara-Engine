@@ -32,6 +32,10 @@ async function getFreePort(): Promise<number> {
 }
 
 type ManagedRuntimeInstall = SidecarRuntimeInstall | MlxRuntimeInstall;
+type SyncOptions = {
+  suppressKnownFailure?: boolean;
+  forceStart?: boolean;
+};
 
 class SidecarServerExitError extends Error {
   readonly exitCode: number | null;
@@ -77,17 +81,21 @@ class SidecarProcessService {
     return this.failedRuntimeVariant;
   }
 
-  async ensureReady(): Promise<string> {
-    await this.syncForCurrentConfig({ suppressKnownFailure: true });
+  async ensureReady(forceStart = false): Promise<string> {
+    await this.syncForCurrentConfig({
+      suppressKnownFailure: !forceStart,
+      forceStart,
+    });
     if (!this.ready || !this.baseUrl) {
       throw new Error(this.startupError ?? "The local sidecar server is not ready");
     }
     return this.baseUrl;
   }
 
-  async syncForCurrentConfig(options?: { suppressKnownFailure?: boolean }): Promise<void> {
+  async syncForCurrentConfig(options?: boolean | SyncOptions): Promise<void> {
+    const normalizedOptions = this.normalizeSyncOptions(options);
     return this.withLock(async () => {
-      await this.syncUnlocked(options);
+      await this.syncUnlocked(normalizedOptions);
     });
   }
 
@@ -159,7 +167,14 @@ class SidecarProcessService {
     }
   }
 
-  private async syncUnlocked(options: { suppressKnownFailure?: boolean } = {}): Promise<void> {
+  private normalizeSyncOptions(options?: boolean | SyncOptions): SyncOptions {
+    if (typeof options === "boolean") {
+      return { forceStart: options };
+    }
+    return options ?? {};
+  }
+
+  private async syncUnlocked(options: SyncOptions = {}): Promise<void> {
     const modelRef = sidecarModelService.getConfiguredModelRef();
     const backend = sidecarModelService.getResolvedBackend();
 
@@ -170,7 +185,7 @@ class SidecarProcessService {
       return;
     }
 
-    if (!sidecarModelService.isEnabled()) {
+    if (!options.forceStart && !sidecarModelService.isEnabled()) {
       await this.stopUnlocked();
       this.clearStartupFailure();
       sidecarModelService.setStatus("downloaded");

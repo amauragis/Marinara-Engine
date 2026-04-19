@@ -380,7 +380,7 @@ class SidecarModelService {
   }
 
   isEnabled(): boolean {
-    return this.config.useForTrackers || this.config.useForGameScene;
+    return this.config.useForGameScene;
   }
 
   getResolvedBackend(): SidecarBackend {
