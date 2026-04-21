@@ -494,7 +494,7 @@ const DEFAULT_COMFYUI_WORKFLOW: Record<string, unknown> = {
   "3": {
     class_type: "KSampler",
     inputs: {
-      seed: 0,
+      seed: "%seed%",
       steps: 20,
       cfg: 7,
       sampler_name: "euler_ancestral",
@@ -512,7 +512,7 @@ const DEFAULT_COMFYUI_WORKFLOW: Record<string, unknown> = {
   },
   "5": {
     class_type: "EmptyLatentImage",
-    inputs: { width: 512, height: 768, batch_size: 1 },
+    inputs: { width: "%width%", height: "%height%", batch_size: 1 },
   },
   "6": {
     class_type: "CLIPTextEncode",
