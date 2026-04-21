@@ -116,7 +116,14 @@ class SidecarProcessService {
     return this.withLock(async () => {
       this.clearStartupFailure();
       const backend = sidecarModelService.getResolvedBackend();
+      const hadUsableRuntime = this.isRuntimeInstalled(backend);
+      if (!hadUsableRuntime) {
+        await this.stopUnlocked();
+      }
       await this.ensureRuntimeInstalled(backend);
+      if (!hadUsableRuntime) {
+        this.cleanupInactiveRuntimeBackends(backend);
+      }
 
       if (sidecarModelService.getConfiguredModelRef() && sidecarModelService.isEnabled()) {
         await this.syncUnlocked({ allowRuntimeInstall: false });
@@ -147,6 +154,8 @@ class SidecarProcessService {
         await this.ensureRuntimeInstalled(backend);
         sidecarModelService.setStatus(sidecarModelService.getConfiguredModelRef() ? "downloaded" : "not_downloaded");
       }
+
+      this.cleanupInactiveRuntimeBackends(backend);
     });
   }
 
@@ -277,6 +286,15 @@ class SidecarProcessService {
 
   private isMlxRuntime(runtime: ManagedRuntimeInstall): runtime is MlxRuntimeInstall {
     return "pythonPath" in runtime;
+  }
+
+  private cleanupInactiveRuntimeBackends(activeBackend: SidecarBackend): void {
+    if (activeBackend === "mlx") {
+      sidecarRuntimeService.resetRuntime();
+      return;
+    }
+
+    mlxRuntimeService.resetRuntime();
   }
 
   private getLlamaServerPath(runtime: ManagedRuntimeInstall): string {

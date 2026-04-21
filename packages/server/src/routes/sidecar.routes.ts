@@ -176,6 +176,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
   }>("/download", async (req, reply) => {
     const { quantization } = z.object({ quantization: quantizationSchema }).parse(req.body);
     await handleDownloadSse(reply, async () => {
+      await sidecarProcessService.stop();
       await sidecarModelService.download(quantization);
       await sidecarProcessService.syncForCurrentConfig({ allowRuntimeInstall: false });
     });
@@ -192,6 +193,7 @@ export const sidecarRoutes: FastifyPluginAsync = async (app) => {
       .parse(req.body);
 
     await handleDownloadSse(reply, async () => {
+      await sidecarProcessService.stop();
       await sidecarModelService.downloadCustomModel(body.repo, body.modelPath);
       await sidecarProcessService.syncForCurrentConfig({ allowRuntimeInstall: false });
     });

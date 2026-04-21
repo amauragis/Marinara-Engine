@@ -222,6 +222,15 @@ class SidecarModelService {
     return existsSync(resolved) ? resolved : null;
   }
 
+  private getConfiguredModelFileTarget(config: SidecarConfig): string | null {
+    if (!config.modelPath) return null;
+    try {
+      return this.resolveModelPath(config.modelPath);
+    } catch {
+      return null;
+    }
+  }
+
   private hasConfiguredModel(config: SidecarConfig = this.config): boolean {
     return this.resolveBackend(config) === "mlx" ? !!config.modelRepo : this.getModelFilePathForConfig(config) !== null;
   }
@@ -258,6 +267,32 @@ class SidecarModelService {
 
     const modelPath = this.getModelFilePathForConfig(config);
     return modelPath && config.modelPath ? basename(config.modelPath) : null;
+  }
+
+  private cleanupPreviousModel(previousConfig: SidecarConfig, nextConfig: SidecarConfig): void {
+    const previousBackend = this.resolveBackend(previousConfig);
+    const nextBackend = this.resolveBackend(nextConfig);
+
+    if (previousBackend === "mlx") {
+      if (previousConfig.modelRepo && previousConfig.modelRepo !== nextConfig.modelRepo) {
+        mlxRuntimeService.clearModelCache();
+      }
+      return;
+    }
+
+    const previousPath = this.getConfiguredModelFileTarget(previousConfig);
+    if (!previousPath || !existsSync(previousPath)) {
+      return;
+    }
+
+    if (nextBackend === "llama_cpp") {
+      const nextPath = this.getConfiguredModelFileTarget(nextConfig);
+      if (nextPath === previousPath) {
+        return;
+      }
+    }
+
+    unlinkSync(previousPath);
   }
 
   private async fetchRepoInfo(repo: string): Promise<HuggingFaceModelApiResponse> {
@@ -430,16 +465,20 @@ class SidecarModelService {
       throw new Error(`Unknown sidecar quantization: ${quantization}`);
     }
 
+    const previousConfig = { ...this.config };
+
     if (modelInfo.backend === "mlx") {
       const repoId = modelInfo.repoId ?? modelInfo.filename;
-      this.config = {
-        ...this.config,
+      const nextConfig: SidecarConfig = {
+        ...previousConfig,
         backend: "mlx",
         modelPath: null,
         modelRepo: repoId,
         quantization,
         customModelRepo: null,
       };
+      this.cleanupPreviousModel(previousConfig, nextConfig);
+      this.config = nextConfig;
       this.saveConfig();
       this.status = "downloaded";
       this.emitProgress(
@@ -458,15 +497,17 @@ class SidecarModelService {
 
     const relativePath = modelInfo.filename;
     const destination = this.resolveModelPath(relativePath);
+    const nextConfig: SidecarConfig = {
+      ...previousConfig,
+      backend: "llama_cpp",
+      modelPath: relativePath,
+      modelRepo: null,
+      quantization,
+      customModelRepo: null,
+    };
     if (existsSync(destination)) {
-      this.config = {
-        ...this.config,
-        backend: "llama_cpp",
-        modelPath: relativePath,
-        modelRepo: null,
-        quantization,
-        customModelRepo: null,
-      };
+      this.cleanupPreviousModel(previousConfig, nextConfig);
+      this.config = nextConfig;
       this.saveConfig();
       this.status = "downloaded";
       this.emitProgress(
@@ -496,14 +537,8 @@ class SidecarModelService {
       onProgress,
     );
 
-    this.config = {
-      ...this.config,
-      backend: "llama_cpp",
-      modelPath: relativePath,
-      modelRepo: null,
-      quantization,
-      customModelRepo: null,
-    };
+    this.cleanupPreviousModel(previousConfig, nextConfig);
+    this.config = nextConfig;
     this.saveConfig();
     this.status = "downloaded";
   }
@@ -548,16 +583,20 @@ class SidecarModelService {
       throw new Error("Repository must be in owner/repo format");
     }
 
+    const previousConfig = { ...this.config };
+
     if (isMacAppleSilicon()) {
       const selected = await this.resolveCustomMlxRepo(repo);
-      this.config = {
-        ...this.config,
+      const nextConfig: SidecarConfig = {
+        ...previousConfig,
         backend: "mlx",
         modelPath: null,
         modelRepo: repo,
         quantization: null,
         customModelRepo: repo,
       };
+      this.cleanupPreviousModel(previousConfig, nextConfig);
+      this.config = nextConfig;
       this.saveConfig();
       this.status = "downloaded";
       this.emitProgress(
@@ -582,6 +621,14 @@ class SidecarModelService {
 
     const relativePath = join("custom", `${slugifyRepo(repo)}__${selected.filename}`).replace(/\\/g, "/");
     const destination = this.resolveModelPath(relativePath);
+    const nextConfig: SidecarConfig = {
+      ...previousConfig,
+      backend: "llama_cpp",
+      modelPath: relativePath,
+      modelRepo: null,
+      quantization: null,
+      customModelRepo: repo,
+    };
     if (!existsSync(destination)) {
       await this.downloadModelFile(
         {
@@ -605,14 +652,8 @@ class SidecarModelService {
       );
     }
 
-    this.config = {
-      ...this.config,
-      backend: "llama_cpp",
-      modelPath: relativePath,
-      modelRepo: null,
-      quantization: null,
-      customModelRepo: repo,
-    };
+    this.cleanupPreviousModel(previousConfig, nextConfig);
+    this.config = nextConfig;
     this.saveConfig();
     this.status = "downloaded";
     return selected;

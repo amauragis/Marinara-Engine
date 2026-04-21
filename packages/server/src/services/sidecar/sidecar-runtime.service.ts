@@ -397,13 +397,7 @@ class SidecarRuntimeService {
     writeFileSync(CURRENT_RUNTIME_PATH, JSON.stringify(record, null, 2), "utf-8");
   }
 
-  resetRuntime(): void {
-    this.cancelInstall();
-    const current = this.getCurrentInstall();
-    if (current?.source === "bundled") {
-      rmSync(current.directoryPath, { recursive: true, force: true });
-    }
-
+  private cleanupBundledArtifacts(keepDirectoryName?: string | null): void {
     for (const entry of readdirSync(RUNTIME_DIR, { withFileTypes: true })) {
       if (entry.name === "mlx" || entry.name === "server.log") {
         continue;
@@ -411,7 +405,13 @@ class SidecarRuntimeService {
 
       const fullPath = join(RUNTIME_DIR, entry.name);
       if (entry.name === "current.json") {
-        unlinkSync(fullPath);
+        if (!keepDirectoryName) {
+          unlinkSync(fullPath);
+        }
+        continue;
+      }
+
+      if (keepDirectoryName && entry.name === keepDirectoryName) {
         continue;
       }
 
@@ -423,6 +423,15 @@ class SidecarRuntimeService {
         rmSync(fullPath, { recursive: true, force: true });
       }
     }
+  }
+
+  resetRuntime(): void {
+    this.cancelInstall();
+    const current = this.getCurrentInstall();
+    if (current?.source === "bundled") {
+      rmSync(current.directoryPath, { recursive: true, force: true });
+    }
+    this.cleanupBundledArtifacts();
   }
 
   private async installLatest(
@@ -510,6 +519,7 @@ class SidecarRuntimeService {
         gpuCapable: this.isGpuVariant(match.variant),
       };
       this.writeCurrentInstall(install);
+      this.cleanupBundledArtifacts(directoryName);
       return install;
     } catch (error) {
       if (extractDirectory) {
